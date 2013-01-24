@@ -19,7 +19,7 @@ def do_parallel_inference(args):
     """Perform inference in parallel on several observations matrices with
     joint parameters
     """
-    from histone_vb_cython3 import random_params, do_inference, plot_params, plot_energy, load_params
+    from histone_tree_hmm import random_params, do_inference, plot_params, plot_energy, load_params
     from vb_mf import normalize_trans
 
     args.I, _, args.L = sp.load(args.observe_matrix[0]).shape
