@@ -19,10 +19,11 @@ def do_parallel_inference(args):
     """Perform inference in parallel on several observations matrices with
     joint parameters
     """
-    from histone_tree_hmm import random_params, do_inference, plot_params, plot_energy, load_params
+    from histone_vb_cython3 import random_params, do_inference, plot_params, plot_energy, load_params
     from vb_mf import normalize_trans
-    
+
     args.I, _, args.L = sp.load(args.observe_matrix[0]).shape
+    I = args.I
     K = args.K
     L = args.L
     args.T = 'all'
@@ -46,7 +47,7 @@ def do_parallel_inference(args):
         tmpargs.out_dir = args.warm_start
         tmpargs.observe = 'all.npy'
         args.free_energy, args.theta, args.alpha, args.beta, args.gamma, args.emit_probs, args.emit_sum = load_params(tmpargs)
-        
+
         try:
             args.free_energy = list(args.free_energy)
         except TypeError: # no previous free energy
@@ -55,11 +56,13 @@ def do_parallel_inference(args):
         args.warm_start = False
     else:
         (args.theta, args.alpha, args.beta, args.gamma, args.emit_probs) = \
-                                                    random_params(args.K,args.L)
+                                                    random_params(args.I, args.K, args.L, args.separate_theta)
         for p in ['free_energy', 'theta', 'alpha', 'beta', 'gamma', 'emit_probs', 'last_free_energy', 'emit_sum']:
             sp.save(os.path.join(args.out_dir, args.out_params.format(param=p, **args.__dict__)),
                 args.__dict__[p])
-    
+
+    args.iteration = 0
+    plot_params(args)
     print '# setting up job arguments'
     # set up new versions of args for other jobs
     job_args = [copy.copy(args) for i in range(len(args.observe_matrix))]
@@ -73,9 +76,9 @@ def do_parallel_inference(args):
         a.quiet_mode = True
         if j % 1000 == 0:
             print j
-    
+
     if args.run_local:
-        pool = multiprocessing.Pool()
+        pool = multiprocessing.Pool(processes=15)
     else:
         pool = sge.SGEPool()
         job_handle = pool.imap_unordered(do_inference, job_args)
@@ -86,12 +89,19 @@ def do_parallel_inference(args):
         # fresh parameters-- to be aggregated after jobs are run
         print 'iteration', args.iteration
         total_free = 0
-        args.theta = sp.zeros((K,K,K), dtype=sp.float64)
+        if args.separate_theta:
+            args.theta = sp.zeros((I-1,K,K,K), dtype=sp.float64)
+        else:
+            args.theta = sp.zeros((K,K,K), dtype=sp.float64)
+
         args.alpha = sp.zeros((K,K), dtype=sp.float64)
         args.beta = sp.zeros((K,K), dtype=sp.float64)
         args.gamma = sp.zeros((K), dtype=sp.float64)
         args.emit_probs = sp.zeros((K,L), dtype=sp.float64)
-        args.emit_sum = sp.zeros(K, sp.float64)
+        if True:#args.approx == 'clique':
+            args.emit_sum = sp.zeros_like(args.emit_probs, dtype=sp.float64)
+        else:
+            args.emit_sum = sp.zeros((K,L), dtype=sp.float64)
         
         if args.run_local:
             iterator = pool.imap_unordered(do_inference, job_args)
@@ -99,7 +109,7 @@ def do_parallel_inference(args):
             for result in iterator:
                 pass
         else:
-            jobs_handle = pool.map_async(do_inference, job_args, chunksize=100)
+            jobs_handle = pool.map_async(do_inference, job_args, chunksize=11)
             # wait for all jobs to finish
             for j in jobs_handle:
                 j.wait()
@@ -108,6 +118,7 @@ def do_parallel_inference(args):
         for a in job_args:
             #print '# loading from %s' % a.observe
             free_energy, theta, alpha, beta, gamma, emit_probs, emit_sum = load_params(a)
+            #print 'free energy for this part:', free_energy
             if len(free_energy) > 0:
                 last_free_energy = free_energy[-1]
             else:
@@ -124,20 +135,24 @@ def do_parallel_inference(args):
         print 'normalize aggregation... total free energy is:', total_free
         args.free_energy.append(total_free)
         if len(args.free_energy) > 1 and args.free_energy[-1] != 0 and args.free_energy[-2] != 0 \
-            and abs(args.free_energy[-2] - args.free_energy[-1]) / args.free_energy[-2] < args.epsilon:
+            and abs((args.free_energy[-2] - args.free_energy[-1]) / args.free_energy[-2]) < args.epsilon:
+            print 'converged. free energy diff:', args.free_energy, abs(args.free_energy[-2] - args.free_energy[-1]) / args.free_energy[-2]
             converged = True
         normalize_trans(args.theta, args.alpha, args.beta, args.gamma)
-        args.emit_probs[:] = sp.dot(sp.diag(1./args.emit_sum), args.emit_probs)
-
+        if True: #args.approx == 'clique':
+            #print 'clique emit renorm'
+            args.emit_probs[:] = args.emit_probs / args.emit_sum
+        else:
+            args.emit_probs[:] = sp.dot(sp.diag(1./args.emit_sum), args.emit_probs)
         for a in job_args:
-            a.theta, a.alpha, a.beta, a.gamma, a.emit_probs = args.theta, args.alpha, args.beta, args.gamma, args.emit_probs
+            a.theta, a.alpha, a.beta, a.gamma, a.emit_probs, a.emit_sum = args.theta, args.alpha, args.beta, args.gamma, args.emit_probs, args.emit_sum
 
-        for p in ['free_energy', 'theta', 'alpha', 'beta', 'gamma', 'emit_probs']:
+        for p in ['free_energy', 'theta', 'alpha', 'beta', 'gamma', 'emit_probs','lmd','tau']:
             sp.save(os.path.join(args.out_dir, args.out_params.format(param=p, **args.__dict__)),
                 args.__dict__[p])
         plot_params(args)
         plot_energy(args)
-        
+
         if args.save_Q >= 3:
             print '# reconstructing chromosomes from *chunk*',
             in_order = {}
