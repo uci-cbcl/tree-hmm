@@ -16,15 +16,16 @@ from libc.math cimport exp, log
 
 
 @cython.profile(False)
-cpdef inline np.float64_t log_obs(Py_ssize_t i, Py_ssize_t t, Py_ssize_t k, np.float64_t[:,:] emit_probs, np.int8_t[:,:,:] X) nogil:
+cpdef inline np.float64_t log_obs(Py_ssize_t i, Py_ssize_t t, Py_ssize_t k, np.float64_t[:,:] emit_probs, np.int8_t[:,:,:] X, np.int8_t[:,:] mark_avail, Py_ssize_t real_i) nogil:
     """Get the emission probability for the given X[i,t,k]"""
     cdef np.float64_t total = 0.
     cdef Py_ssize_t l
     for l in xrange(X.shape[2]):
-        if X[i,t,l]:
-            total += log(emit_probs[k,l])
-        else:
-            total += log(1. - emit_probs[k,l])
+        if mark_avail[real_i,l]:
+            if X[i,t,l]:
+                total += log(emit_probs[k,l])
+            else:
+                total += log(1. - emit_probs[k,l])
     return total
 
 
@@ -33,6 +34,7 @@ cpdef make_log_obs_matrix(args):
     cdef np.ndarray[np.float64_t, ndim=3] log_obs_mat = args.log_obs_mat
     cdef np.int8_t[:,:,:] X = args.X
     cdef np.float64_t[:,:] emit = args.emit_probs
+    cdef np.int8_t[:,:] mark_avail = args.mark_avail
     cdef Py_ssize_t I = X.shape[0], T = X.shape[1], K = emit.shape[0]
     cdef Py_ssize_t i,t,k
     #log_obs_mat[...] = np.zeros((I,T,K))
@@ -41,32 +43,52 @@ cpdef make_log_obs_matrix(args):
     #print 'making log_obs matrix'
     #for i in prange(I, nogil=True):
     for i in xrange(I):
+        real_i = args.real_species_i if args.real_species_i is not None else i
         for t in xrange(T):
             for k in xrange(K):
                 #obs_mat_view[i,t,k] = log_obs(i,t,k,emit,X)
-                log_obs_mat[i,t,k] = log_obs(i,t,k,emit,X)
+                log_obs_mat[i,t,k] = log_obs(i,t,k,emit,X, mark_avail, real_i)
 
 
-cpdef normalize_trans(np.ndarray[np.float64_t, ndim=3] theta,
-                        np.ndarray[np.float64_t, ndim=2] alpha,
-                        np.ndarray[np.float64_t, ndim=2] beta,
-                        np.ndarray[np.float64_t, ndim=1] gamma):
+#cpdef normalize_trans(np.ndarray[np.float64_t, ndim=3] theta,
+#                        np.ndarray[np.float64_t, ndim=2] alpha,
+#                        np.ndarray[np.float64_t, ndim=2] beta,
+#                        np.ndarray[np.float64_t, ndim=1] gamma):
+#    """renormalize transition matrices appropriately"""
+#    cdef Py_ssize_t K, k, v, h
+#    K = gamma.shape[0]
+#    cdef np.ndarray[np.float64_t, ndim=2] t_sum = theta.sum(axis=2)
+#    cdef np.ndarray[np.float64_t, ndim=1] a_sum = alpha.sum(axis=1)
+#    cdef np.ndarray[np.float64_t, ndim=1] b_sum = beta.sum(axis=1)
+#    cdef np.float64_t g_sum = gamma.sum()
+#    # all probability goes to one of K states
+#    for k in range(K):
+#        for v in xrange(K):
+#            for h in xrange(K):
+#                theta[v, h, k] /= t_sum[v, h]
+#            alpha[v, k] /= a_sum[v]
+#            beta[v, k] /= b_sum[v]
+#    gamma /= g_sum
+
+def normalize_trans(theta, alpha, beta, gamma):
     """renormalize transition matrices appropriately"""
-    cdef Py_ssize_t K, k, v, h
     K = gamma.shape[0]
-    cdef np.ndarray[np.float64_t, ndim=2] t_sum = theta.sum(axis=2)
-    cdef np.ndarray[np.float64_t, ndim=1] a_sum = alpha.sum(axis=1)
-    cdef np.ndarray[np.float64_t, ndim=1] b_sum = beta.sum(axis=1)
-    cdef np.float64_t g_sum = gamma.sum()
+    if len(theta.shape)==3:
+        t_sum = theta.sum(axis=2)
+        for k in range(K):
+            theta[:,:,k] /= t_sum
+    else:  # case for separate theta
+        t_sum = theta.sum(axis=3)
+        for k in range(K):
+            theta[:,:,:,k] /= t_sum
+    a_sum = alpha.sum(axis=1)
+    b_sum = beta.sum(axis=1)
+    g_sum = gamma.sum()
     # all probability goes to one of K states
     for k in range(K):
-        for v in xrange(K):
-            for h in xrange(K):
-                theta[v, h, k] /= t_sum[v, h]
-            alpha[v, k] /= a_sum[v]
-            beta[v, k] /= b_sum[v]
+        alpha[:, k] /= a_sum
+        beta[:, k] /= b_sum
     gamma /= g_sum
-
 
 cpdef normalize_emit(np.ndarray[np.float64_t, ndim=3] Q,
                         np.ndarray[np.float64_t, ndim=2] emit_probs,
@@ -77,14 +99,22 @@ cpdef normalize_emit(np.ndarray[np.float64_t, ndim=3] Q,
     T = Q.shape[1]
     K = emit_probs.shape[0]
     L = emit_probs.shape[1]
-    cdef np.ndarray[np.float64_t, ndim=1] e_sum = np.ones(K, dtype=np.float64) * pseudocount
+#    cdef np.ndarray[np.float64_t, ndim=1] e_sum = np.ones(K, dtype=np.float64) * pseudocount
+    
+    # consider missing marks, e_sum becomes K*L array (mark specific)
+    cdef np.ndarray[np.float64_t, ndim=2] e_sum = np.ones((K,L), dtype=np.float64) * pseudocount *T
     # all probability goes to one of K states
     for k in range(K):
         for i in xrange(I):
-            for t in xrange(T):
-                e_sum[k] += Q[i,t,k]
+            real_i = args.real_species_i if args.real_species_i is not None else i
+            for l in xrange(L):
+                if args.mark_avail[real_i,l]:
+                    for t in xrange(T):
+                    #e_sum[k] += Q[i,t,k]
+                        e_sum[k,l] += Q[i,t,k]
     if renormalize:
-        emit_probs[:] = np.dot(np.diag(1./e_sum), emit_probs)
+        #emit_probs[:] = np.dot(np.diag(1./e_sum), emit_probs)
+        emit_probs[:] = emit_probs/e_sum
     args.emit_sum = e_sum
 
 
@@ -258,19 +288,19 @@ cpdef mf_update_params(args, renormalize=True):
     cdef np.float64_t[:,:,:] log_obs_mat
     cdef np.float64_t pseudocount
     X = args.X
-    Q, theta, alpha, beta, gamma, emit_probs, vert_parent, vert_children, log_obs_mat, pseudocount = (args.Q, args.theta,
-                                                   args.alpha, args.beta,
-                                                   args.gamma, args.emit_probs, args.vert_parent, args.vert_children, args.log_obs_mat, args.pseudocount)
+    Q, theta, alpha, beta, gamma, emit_probs, vert_parent, vert_children, log_obs_mat, pseudocount, mark_avail = (args.Q, args.theta, args.alpha, args.beta,
+                        args.gamma, args.emit_probs, args.vert_parent, args.vert_children, args.log_obs_mat, args.pseudocount, args.mark_avail)
     cdef int I = Q.shape[0], T = Q.shape[1], K = Q.shape[2]
     cdef int L = X.shape[2]
     cdef Py_ssize_t i,t,v,h,k,vp,l
     #print 'mf_update_params'
-    theta[:] = pseudocount
-    alpha[:] = pseudocount
+    theta[:] = pseudocount*T
+    alpha[:] = pseudocount*T
     beta[:] = pseudocount
     gamma[:] = pseudocount
-    emit_probs[:] = pseudocount
+    emit_probs[:] = pseudocount*T
     for i in xrange(I):
+        real_i = args.real_species_i if args.real_species_i is not None else i
     #for i in prange(I, nogil=True):
         vp = vert_parent[i]
         for t in xrange(T):
@@ -287,7 +317,7 @@ cpdef mf_update_params(args, renormalize=True):
                             for h in xrange(K):
                                 theta[v,h,k] += Q[i,t,k] * Q[i,t-1,h] * Q[vp,t,v]
                 for l in xrange(L):
-                    if X[i,t,l]:
+                    if mark_avail[real_i,l] and X[i,t,l]:
                         emit_probs[k, l] += Q[i, t, k]
     if renormalize:
         normalize_trans(theta, alpha, beta, gamma)

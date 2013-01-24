@@ -50,7 +50,7 @@ def prodc_initialize_qs(theta, alpha, beta, gamma, emit_probs, X, log_obs_mat):
 #            a_t = array(random.random((10,))) * np.dot(a_t.T, transmat)
             a_s[t,:] = a_t
 
-        #back-ward algorithm        
+        #backward algorithm        
         for t in range(T-2,-1,-1):
             b_t = np.dot(transmat, emit_probs_mat[:,t+1]*b_t)
             b_t /= s_t[t+1]  # previously t
@@ -76,6 +76,7 @@ def prodc_initialize_qs(theta, alpha, beta, gamma, emit_probs, X, log_obs_mat):
     return Q, Q_pairs
 
 def prodc_update_q(args):
+
     cdef int i = 0, I = args.I
     args.Q_prev = copy.deepcopy(args.Q)
     for i in xrange(I):
@@ -85,7 +86,6 @@ def prodc_update_q(args):
         prodc_update_qs_i_new(i, args.theta, args.alpha, args.beta, args.gamma,
                           args.emit_probs, args.X, args.Q, args.Q_pairs,
                           args.vert_parent, args.vert_children, args.log_obs_mat)
-                          
 
 
 
@@ -155,11 +155,13 @@ cpdef prodc_update_qs_i_new(int si, np.ndarray[np.float64_t, ndim=3] theta,
         for v in xrange(K):
             g_t[v] = 0.
         for k in xrange(K):
+            #evidence term from marginalization of children
             q_sum_k_ch_i = 0.
             for ch_i in vert_children[si]:
                 for v in xrange(K):
                     for h in xrange(K):
                         q_sum_k_ch_i += Q_pairs[ch_i, t, h, v] * log_theta[k, h, v]
+            # all together
             for v in xrange(K):
                 if si == 0:
                     log_f[v,k] = log_alpha[v,k] + log_g_t[k] + q_sum_k_ch_i
@@ -245,10 +247,6 @@ cpdef prodc_update_qs_i_new(int si, np.ndarray[np.float64_t, ndim=3] theta,
         a_t /= s_t[t]
         a_s[t,:] = a_t
     
-        #print t, a_s[t,:]
-    #print 'forward done, waiting...'
-    #time.sleep(3)
-    #print a_s
     
     #backward algorithm
     for t in xrange(T-2,-1,-1):
@@ -307,144 +305,133 @@ cpdef prodc_update_qs_i_new(int si, np.ndarray[np.float64_t, ndim=3] theta,
         tmp1 = a_s[t,:]* b_s[t,:]
         Q[si, t,:] = tmp1/tmp1.sum()
         tmp2 = np.dot(np.dot(diag(a_s[t-1,:]), transmat[t]), diag(emit_probs_mat[:,t]* b_s[t,:]))
-        Q_pairs[si, t]  = tmp2/tmp2.sum()        
+        Q_pairs[si, t] = tmp2/tmp2.sum()        
 
 
-
-
-
-
-def prodc_update_qs_i(si, theta, alpha, beta, gamma, emit_probs, X, Q, Q_pairs, vert_parent, vert_children):
-    # first calculate the transition matrices (all different for different t) for chain si
-    I, T, L = X.shape
-    #I = 1
-    K = alpha.shape[0]
-    #print 'prodc_update_qs'
-    a_s = np.zeros((T,K)) 
-    b_s = np.zeros((T,K))
-    transmat = np.zeros((T, K, K))
-    loglh = np.zeros(I)
-    emit_probs_mat = np.exp(log_emit_probs_i(emit_probs, X, si))
-    #start from the last node
-    
-    g_t = np.ones((K,)) # initialize for last node
-    if si == 0:
-        for t in range(T-1,0,-1):
-            log_f = np.log(alpha)
-            
-            # possibly need to check if this is leaf node
-            for k in range(K):
-                log_f[:,k] += np.log(g_t[k])
-                for ch_i in vert_children[si]:
-                    log_f[:,k] += (Q_pairs[ch_i,t,:,:] * np.log(theta[k,:,:])).sum()
-            
-            #breakpoint()        
-            f_t = np.exp(log_f)
-            g_t = f_t.sum(axis=1)
-            transmat[t,:,:] = np.dot(diag(1./g_t), f_t)
-            g_t /= max(g_t)
-            #if abs(transmat[t,1].sum()-1) > 1E-6:
-                #breakpoint()
-                
-        # first node
-        log_f1 = np.log(gamma)+np.log(g_t)
-        for ch_i in vert_children[si]:          
-            log_f1 += np.dot(np.log(beta), Q[ch_i,0,:])
-            
-        tmp = np.exp(log_f1)
-        f1 = tmp/tmp.sum()
-        
-        
-    else:
-        vp = vert_parent[si]
-        for t in range(T-1,0,-1):
-#            log_f = np.dot(Q[vp, t, :], np.log(theta))
-            log_f = np.zeros((K,K))
-            # safe way
-            for i in range(K):
-                for j in range(K):
-                    log_f[i,j] += np.dot(Q[vp,t,:], np.log(theta[:,i,j]))
-
-#            breakpoint()
-            
-            # possibly need to check if this is leaf node
-            for k in range(K):
-                log_f[:,k] += np.log(g_t[k])
-                for ch_i in vert_children[si]:
-                    log_f[:,k] += (Q_pairs[ch_i,t,:,:] * np.log(theta[j,:,:])).sum()
-                    
-            f_t = np.exp(log_f)
-            g_t = f_t.sum(axis=1)             
-            transmat[t,:,:] = np.dot(diag(1./g_t), f_t)
-            g_t /= max(g_t)
-            if abs(transmat[t,1].sum()-1) > 1E-6:
-                #breakpoint()
-                pass
-
-        # first node
-        log_f1 = np.dot(Q[vp,0,:], np.log(beta)) + np.log(g_t)  # vector instead of a matrix
-        #breakpoint()
-        for ch_i in vert_children[si]:          
-            log_f1 += np.dot(np.log(beta), Q[ch_i,0,:])
-            
-        tmp = np.exp(log_f1)
-        f1 = tmp/tmp.sum()
-
-    # update Q, Q_pairs, lh            
-    a_t = f1 * emit_probs_mat[:, 0]
-    s_t = [a_t.sum()]
-    a_t /= s_t[0]
-    b_t = np.ones((K,))
-    a_s[0,:] = a_t
-    b_s[T-1,:] = b_t
-
-    # forward algorithm
-    for t in range(1,T):
-#        breakpoint()        *#*#*#*#     
-        a_t = emit_probs_mat[:, t] * (np.dot(a_t.T, transmat[t,:,:]))
-        s_t.append(a_t.sum())
-        a_t /= s_t[t]
-        a_s[t,:] = a_t
-
-    #backward algorithm        
-    for t in range(T-2,-1,-1):
-        b_t = np.dot(transmat[t+1,:,:], emit_probs_mat[:,t+1]*b_t)
-        b_t /= s_t[t+1]
-        b_s[t,:] = b_t
-        
-    loglh[si] = np.log(array(s_t)).sum()
-#    print a_s.shape, b_s.shape, loglh.shape
-    tmp1 = a_s[0,:] * b_s[0,:]
-    Q[si,0,:] = tmp1/tmp1.sum()
-    for t in range(1,T):
-        tmp1 = a_s[t,:]* b_s[t,:]
-        Q[si, t,:] = tmp1/tmp1.sum()
-        tmp2 = np.dot(np.dot(diag(a_s[t-1,:]), transmat[t]), diag(emit_probs_mat[:,t]* b_s[t,:]))
-        Q_pairs[si, t]  = tmp2/tmp2.sum()        
-
-
-
-def log_emit_probs_i(emit_probs, X, i):
-#"""Get the emission probability for the given X[i,t]"""
-    K = emit_probs.shape[0]
-    I, T, L = X.shape
-    #I = 1
-    a = np.zeros((K, T))
-    for t in range(T):
-        for l in range(L):
-            if X[i,t,l]:
-                a[:,t] += np.log(emit_probs[:,l])
-            else:
-                a[:,t] += np.log(1-emit_probs[:,l])
-            
-    return a
-
-
-
-
-
-
-
+#def prodc_update_qs_i(si, theta, alpha, beta, gamma, emit_probs, X, Q, Q_pairs, vert_parent, vert_children):
+#    # first calculate the transition matrices (all different for different t) for chain si
+#    I, T, L = X.shape
+#    #I = 1
+#    K = alpha.shape[0]
+#    #print 'prodc_update_qs'
+#    a_s = np.zeros((T,K)) 
+#    b_s = np.zeros((T,K))
+#    transmat = np.zeros((T, K, K))
+#    loglh = np.zeros(I)
+#    emit_probs_mat = np.exp(log_emit_probs_i(emit_probs, X, si))
+#    #start from the last node
+#    
+#    g_t = np.ones((K,)) # initialize for last node
+#    if si == 0:
+#        for t in range(T-1,0,-1):
+#            log_f = np.log(alpha)
+#            
+#            # possibly need to check if this is leaf node
+#            for k in range(K):
+#                log_f[:,k] += np.log(g_t[k])
+#                for ch_i in vert_children[si]:
+#                    log_f[:,k] += (Q_pairs[ch_i,t,:,:] * np.log(theta[k,:,:])).sum() # a number
+#            
+#            #breakpoint()        
+#            f_t = np.exp(log_f)
+#            g_t = f_t.sum(axis=1)
+#            transmat[t,:,:] = np.dot(diag(1./g_t), f_t)
+#            g_t /= max(g_t)
+#            #if abs(transmat[t,1].sum()-1) > 1E-6:
+#                #breakpoint()
+#                
+#        # first node
+#        log_f1 = np.log(gamma)+np.log(g_t)
+#        for ch_i in vert_children[si]:          
+#            log_f1 += np.dot(np.log(beta), Q[ch_i,0,:])
+#            
+#        tmp = np.exp(log_f1)
+#        f1 = tmp/tmp.sum()
+#        
+#        
+#    else:
+#        vp = vert_parent[si]
+#        for t in range(T-1,0,-1):
+##            log_f = np.dot(Q[vp, t, :], np.log(theta))
+#            log_f = np.zeros((K,K))
+#            # safe way
+#            for i in range(K):
+#                for j in range(K):
+#                    log_f[i,j] += np.dot(Q[vp,t,:], np.log(theta[:,i,j]))
+#
+##            breakpoint()
+#            
+#            # possibly need to check if this is leaf node
+#            for k in range(K):
+#                log_f[:,k] += np.log(g_t[k])
+#                for ch_i in vert_children[si]:
+#                    log_f[:,k] += (Q_pairs[ch_i,t,:,:] * np.log(theta[j,:,:])).sum()
+#                    
+#            f_t = np.exp(log_f)
+#            g_t = f_t.sum(axis=1)             
+#            transmat[t,:,:] = np.dot(diag(1./g_t), f_t)
+#            g_t /= max(g_t)
+#            if abs(transmat[t,1].sum()-1) > 1E-6:
+#                #breakpoint()
+#                pass
+#
+#        # first node
+#        log_f1 = np.dot(Q[vp,0,:], np.log(beta)) + np.log(g_t)  # vector instead of a matrix
+#        #breakpoint()
+#        for ch_i in vert_children[si]:          
+#            log_f1 += np.dot(np.log(beta), Q[ch_i,0,:])
+#            
+#        tmp = np.exp(log_f1)
+#        f1 = tmp/tmp.sum()
+#
+#    # update Q, Q_pairs, lh            
+#    a_t = f1 * emit_probs_mat[:, 0]
+#    s_t = [a_t.sum()]
+#    a_t /= s_t[0]
+#    b_t = np.ones((K,))
+#    a_s[0,:] = a_t
+#    b_s[T-1,:] = b_t
+#
+#    # forward algorithm
+#    for t in range(1,T):
+##        breakpoint()        *#*#*#*#     
+#        a_t = emit_probs_mat[:, t] * (np.dot(a_t.T, transmat[t,:,:]))
+#        s_t.append(a_t.sum())
+#        a_t /= s_t[t]
+#        a_s[t,:] = a_t
+#
+#    #backward algorithm        
+#    for t in range(T-2,-1,-1):
+#        b_t = np.dot(transmat[t+1,:,:], emit_probs_mat[:,t+1]*b_t)
+#        b_t /= s_t[t+1]
+#        b_s[t,:] = b_t
+#        
+#    loglh[si] = np.log(array(s_t)).sum()
+##    print a_s.shape, b_s.shape, loglh.shape
+#    tmp1 = a_s[0,:] * b_s[0,:]
+#    Q[si,0,:] = tmp1/tmp1.sum()
+#    for t in range(1,T):
+#        tmp1 = a_s[t,:]* b_s[t,:]
+#        Q[si, t,:] = tmp1/tmp1.sum()
+#        tmp2 = np.dot(np.dot(diag(a_s[t-1,:]), transmat[t]), diag(emit_probs_mat[:,t]* b_s[t,:]))
+#        Q_pairs[si, t]  = tmp2/tmp2.sum()        
+#
+#
+#
+#def log_emit_probs_i(emit_probs, X, i):
+##"""Get the emission probability for the given X[i,t]"""
+#    K = emit_probs.shape[0]
+#    I, T, L = X.shape
+#    #I = 1
+#    a = np.zeros((K, T))
+#    for t in range(T):
+#        for l in range(L):
+#            if X[i,t,l]:
+#                a[:,t] += np.log(emit_probs[:,l])
+#            else:
+#                a[:,t] += np.log(1-emit_probs[:,l])
+#            
+#    return a
 
 
 
@@ -460,9 +447,9 @@ def prodc_update_params(args, renormalize=True):
         np.ndarray[np.float64_t, ndim=3] log_obs_mat
         np.float64_t pseudocount
     X = args.X
-    Q, Q_pairs, theta, alpha, beta, gamma, emit_probs, vert_parent, vert_children, log_obs_mat, pseudocount = (args.Q, args.Q_pairs, args.theta,
-                                                   args.alpha, args.beta,
-                                                   args.gamma, args.emit_probs, args.vert_parent, args.vert_children, args.log_obs_mat, args.pseudocount)
+    Q, Q_pairs, theta, alpha, beta, gamma, emit_probs, vert_parent, vert_children, log_obs_mat, pseudocount, mark_avail = (args.Q, args.Q_pairs, args.theta, args.alpha, args.beta,
+                                                   args.gamma, args.emit_probs, args.vert_parent, args.vert_children, args.log_obs_mat, args.pseudocount, args.mark_avail)
+#    print 'got here'
     cdef int I = Q.shape[0], T = Q.shape[1], K = Q.shape[2]
     cdef int L = X.shape[2]
     cdef Py_ssize_t i,t,v,h,k,vp,l
@@ -489,7 +476,8 @@ def prodc_update_params(args, renormalize=True):
                             for h in xrange(K):
                                 theta[v,h,k] += Q[vp,t,v] * Q_pairs[i,t,h,k]
                 for l in xrange(L):
-                    if X[i,t,l]:
+                    real_i = args.real_species_i if args.real_species_i is not None else i
+                    if mark_avail[real_i,l] and X[i,t,l]:
                         emit_probs[k, l] += Q[i, t, k]
     if renormalize:
         normalize_trans(theta, alpha, beta, gamma)
@@ -567,56 +555,56 @@ cpdef np.float64_t prodc_free_energy(args):
 
 
     
-def prodc_free_energy_old(args):
-    """calculate the free energy for the current Qand parameters"""
-    theta, alpha, beta, gamma, emit_probs, X, Q, Q_pairs = (args.theta,
-                        args.alpha, args.beta, args.gamma, args.emit_probs,
-                        args.X, args.Q, args.Q_pairs)
-    vert_parent = args.vert_parent
-    log_obs_mat = args.log_obs_mat
-    I, T, L = X.shape
-    #I = 1
-    K = alpha.shape[0]
-    free_e = 0.
-    log_theta, log_alpha, log_beta, log_gamma = np.log(theta), np.log(alpha), np.log(beta), np.log(gamma)
-    #log_emit_probs_mat = np.zeros((K,T))
-    for i in range(I):
-        # calculate emission matrix K*T
-        #log_emit_probs_mat[:] = log_emit_probs_i(emit_probs, X, i)
-        #log_emit_probs_mat[:] = np.exp(log_obs_mat[i,:,:])
-        log_emit_probs_mat = args.log_obs_mat[i,:,:].T
-        
-        #calculate Q* log(Q)
-        free_e += np.dot(Q[i, 0,:], np.log(Q[i, 0,:]))
-        for t in xrange(1, T):
-            q_cond = np.dot(diag(1./Q[i,t-1,:]), Q_pairs[i, t])
-            #if (q_cond - 1. > epsilon).any(): #abs(q_cond.sum(axis=1) -1.).any() > epsilon:
-            #    breakpoint()
-            #    print q_cond
-            
-            free_e += (Q_pairs[i, t] * np.log(q_cond)).sum()
-
-        # calculate - Q* log(P)
-        if i == 0:
-            for t in range(T):
-                free_e -= (Q[i,t,:] * log_emit_probs_mat[:, t] ).sum()
-                if t == 0:
-                    free_e -= (Q[0,0,:] * log_gamma).sum()
-                else:
-                    free_e -= (Q_pairs[i, t] * log_alpha).sum()
-            #breakpoint()
-        else:
-            vp = vert_parent[i]
-            for t in xrange(T):
-                free_e -= (Q[i,t,:] * log_emit_probs_mat[:, t] ).sum()
-                if t == 0:
-                    free_e -= np.dot(np.dot(diag(Q[vp,0,:]), log_beta), diag(Q[i,0,:])).sum()
-                else:
-                    tmp = []
-                    for k in range(K):
-                        tmp.append((Q_pairs[i, t] * log_theta[k]).sum())
-                    free_e -= np.dot(Q[vp, t], tmp)
-            #breakpoint()
-    print 'final part:', free_e
-    return free_e
-
+#def prodc_free_energy_old(args):
+#    """calculate the free energy for the current Q and parameters"""
+#    theta, alpha, beta, gamma, emit_probs, X, Q, Q_pairs = (args.theta,
+#                        args.alpha, args.beta, args.gamma, args.emit_probs,
+#                        args.X, args.Q, args.Q_pairs)
+#    vert_parent = args.vert_parent
+#    log_obs_mat = args.log_obs_mat
+#    I, T, L = X.shape
+#    #I = 1
+#    K = alpha.shape[0]
+#    free_e = 0.
+#    log_theta, log_alpha, log_beta, log_gamma = np.log(theta), np.log(alpha), np.log(beta), np.log(gamma)
+#    #log_emit_probs_mat = np.zeros((K,T))
+#    for i in range(I):
+#        # calculate emission matrix K*T
+#        #log_emit_probs_mat[:] = log_emit_probs_i(emit_probs, X, i)
+#        #log_emit_probs_mat[:] = np.exp(log_obs_mat[i,:,:])
+#        log_emit_probs_mat = args.log_obs_mat[i,:,:].T
+#        
+#        #calculate Q* log(Q)
+#        free_e += np.dot(Q[i, 0,:], np.log(Q[i, 0,:]))
+#        for t in xrange(1, T):
+#            q_cond = np.dot(diag(1./Q[i,t-1,:]), Q_pairs[i, t])
+#            #if (q_cond - 1. > epsilon).any(): #abs(q_cond.sum(axis=1) -1.).any() > epsilon:
+#            #    breakpoint()
+#            #    print q_cond
+#            
+#            free_e += (Q_pairs[i, t] * np.log(q_cond)).sum()
+#
+#        # calculate - Q* log(P)
+#        if i == 0:
+#            for t in range(T):
+#                free_e -= (Q[i,t,:] * log_emit_probs_mat[:, t] ).sum()
+#                if t == 0:
+#                    free_e -= (Q[0,0,:] * log_gamma).sum()
+#                else:
+#                    free_e -= (Q_pairs[i, t] * log_alpha).sum()
+#            #breakpoint()
+#        else:
+#            vp = vert_parent[i]
+#            for t in xrange(T):
+#                free_e -= (Q[i,t,:] * log_emit_probs_mat[:, t] ).sum()
+#                if t == 0:
+#                    free_e -= np.dot(np.dot(diag(Q[vp,0,:]), log_beta), diag(Q[i,0,:])).sum()
+#                else:
+#                    tmp = []
+#                    for k in range(K):
+#                        tmp.append((Q_pairs[i, t] * log_theta[k]).sum())
+#                    free_e -= np.dot(Q[vp, t], tmp)
+#            #breakpoint()
+#    print 'final part:', free_e
+#    return free_e
+#

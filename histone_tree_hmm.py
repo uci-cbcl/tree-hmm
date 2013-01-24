@@ -56,6 +56,7 @@ import time
 from math import ceil
 import cPickle as pickle
 import copy
+import re
 
 try:
     import pysam
@@ -81,10 +82,12 @@ sp.seterr(under='print')
 #sp.random.seed([5])
 
 import vb_mf
-import vb_prodc
-import loopy_bp
+#import vb_prodc
+#import loopy_bp
+import loopy_bp2 as loopy_bp
 import clique_hmm
 #import concatenate_hmm
+#import vb_gmtkExact
 
 from do_parallel import do_parallel_inference
 
@@ -103,36 +106,123 @@ def timespan(start=[time.time()]):
 def dependencies_for_freezing():
     from scipy.io.matlab import streams
 
-
-valid_species = ['H1hesc', 'K562', 'Gm12878', 'Hepg2', 'Huvec', 'Hsmm', 'Nhlf', 'Nhek', 
+###################### ENCODE human ######################
+valid_species = ['H1hesc', 'K562', 'Gm12878', 'Hepg2', 'Huvec', 'Hsmm', 'Nhlf', 'Nhek',
                  'Hmec' ]  # 'Helas3' is extra
 #valid_marks = ['Ctcf', 'H2az', 'H3k27ac', 'H3k27me3', 'H3k36me3', 'H3k4me1',
 #            'H3k4me2', 'H3k4me3', 'H3k79me2', 'H3k9ac', 'H3k9me3', 'H4k20me1']
-valid_marks = ['Ctcf', 'H3k27me3', 'H3k36me3', 'H4k20me1', 'H3k4me1', 'H3k4me2', 'H3k4me3', 'H3k27ac',  
+valid_marks = ['Ctcf', 'H3k27me3', 'H3k36me3', 'H4k20me1', 'H3k4me1', 'H3k4me2', 'H3k4me3', 'H3k27ac',
                'H3k9ac',  'Control',]  # no H2az or H3K9me3
-#valid_marks = ['Ctcf', 'H3k27ac', 'H3k27me3', 'H3k36me3', 'H3k4me2', 'H3k4me3',
-#               'H3k9ac', 'H4k20me1', 'Control',]  # H3K4me1 has an issue in Hepg2-- skipping for now
-#phylogeny = {'H1hesc':'H1hesc', 'HUVEC':'H1hesc', 'Hsmm':'H1hesc',
-#             'NHLF':'H1hesc', 'Gm12878':'H1hesc', 'K562':'Gm12878',
-#             'NHEK':'Gm12878', 'Hmec':'Gm12878', 'Hepg2':'Hsmm'}
 phylogeny = {'H1hesc':'H1hesc', 'Huvec':'H1hesc', 'Hsmm':'H1hesc',
              'Nhlf':'H1hesc', 'Gm12878':'H1hesc', 'K562':'H1hesc',
              'Nhek':'H1hesc', 'Hmec':'H1hesc', 'Hepg2':'H1hesc'}
-inference_types = ['mf', 'poc', 'pot', 'clique', 'concat', 'loopy']
+mark_avail = sp.ones((len(valid_species),len(valid_marks)), dtype = sp.int8)
+
+#valid_species = ['H1hesc', 'Endoderm', 'Mesoderm', 'Ectoderm', 'K562', 'Gm12878', 'Hepg2', 'Huvec', 'Hsmm', 'Nhlf', 'Nhek',
+#                 'Hmec' ]  # 'Helas3' is extra
+#phylogeny = {'H1hesc':'H1hesc', 'Endoderm':'H1hesc', 'Mesoderm':'H1hesc', 'Ectoderm':'H1hesc', 'K562':'Mesoderm', 'Gm12878':'Mesoderm', 'Huvec':'Mesoderm', 'Hsmm':'Mesoderm',
+#             'Nhlf':'Endoderm', 'Nhek':'Ectoderm', 'Hmec':'Ectoderm', 'Hepg2':'Endoderm'}
+#mark_avail = sp.array([[1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+#                      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+#                      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+#                      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+#                      [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+#                      [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+#                      [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+#                      [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+#                      [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+#                      [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+#                      [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+#                      [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+#                      [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]], dtype = sp.int8)
+###################### modENCODE fly ######################
+#valid_species = ['E0', 'E4', 'E8', 'E12', 'E16', 'E20', 'L1', 'L2', 'L3', 'Pupae', 'Adult female', 'Adult male']
+#valid_marks = ['H3K27ac', 'H3K27me3', 'H3K4me1','H3K4me3','H3K9ac','H3K9me3']
+#phylogeny = {'E4':'E0', 'E8':'E4', 'E12':'E8','E16':'E12', 'E20':'E16',
+#             'L1':'E20','L2':'L1', 'L3':'L2', 'Pupae':'L3', 'Adult female':'Pupae', 'Adult male':'Adult female'}
+#mark_avail = sp.ones((12,6), dtype = sp.int8)
+
+###################### ENCODE mouse ######################
+#valid_species = ['Progenitor', 'Ch12', 'Erythrobl', 'G1eer4e2', 'G1e', 'Megakaryo']
+#valid_marks = ['H3k04me1', 'H3k04me3', 'H3k09me3', 'H3k27me3',  'H3k36me3', 'Input']
+#phylogeny = {'Ch12':'Progenitor', 'Erythrobl':'Progenitor', 'G1eer4e2':'Progenitor','G1e':'Progenitor', 'Megakaryo':'Progenitor',
+#            'G1eer4e2':'G1e'}
+#
+#mark_avail = sp.array([[0, 0, 0, 0, 0, 0],
+#                       [1, 1, 1, 1, 1, 1],
+#                       [1, 1, 1, 1, 1, 1],
+#                       [1, 1, 1, 1, 1, 1],
+#                       [1, 1, 1, 1, 1, 1],
+#                       [1, 1, 1, 1, 1, 1]], dtype = sp.int8)
+
+##################### ENCODE mouse2 ######################
+#valid_species = ['Bmarrow', 'Ch12', 'Erythrobl', 'G1eer4e2', 'G1e', 'Megakaryo']
+#phylogeny = {'Ch12':'Bmarrow', 'Erythrobl':'Bmarrow', 'G1eer4e2':'Bmarrow','G1e':'Bmarrow', 'Megakaryo':'Bmarrow',
+#            'G1eer4e2':'G1e'}
+#valid_marks = ['H3k27ac', 'H3k04me1', 'H3k04me3', 'H3k09me3', 'H3k27me3',  'H3k36me3', 'Input']
+#mark_avail = sp.array([[1, 1, 1, 0, 0, 0, 1],
+#                       [1, 1, 1, 1, 1, 1, 1],
+#                       [0, 1, 1, 1, 1, 1, 1],
+#                       [0, 1, 1, 1, 1, 1, 1],
+#                       [0, 1, 1, 1, 1, 1, 1],
+#                       [0, 1, 1, 1, 1, 1, 1]], dtype = sp.int8)
+
+
+#valid_species = ['Bmarrow', 'G1e', 'G1eer4e2']
+#valid_marks = ['H3k27ac','H3k04me1', 'H3k04me3', 'H3k09me3', 'H3k27me3', 'H3k36me3', 'Input']
+#phylogeny = {'G1e':'Bmarrow', 'G1eer4e2':'G1e'}
+##
+#mark_avail = sp.array([[1, 1, 1, 0, 0, 0, 1],
+#                       [0, 1, 1, 1, 1, 1, 1],
+#                       [0, 1, 1, 1, 1, 1, 1]], dtype = sp.int8)
+
+
+
+
+#valid_species = range(20)
+#valid_marks = range(20)
+#phylogeny = {i: 0 for i in range(20)}
+
+#valid_species = ['G1e', 'G1eer4e2']
+#valid_marks = ['H3k04me1', 'H3k04me3', 'H3k09me3', 'H3k27me3', 'H3k36me3', 'Input']
+#phylogeny = {'G1eer4e2':'G1e'}
+#
+#mark_avail = sp.ones((2,6), dtype = sp.int8)
+
+
+#valid_marks = ['H3k27ac','H3k04me1', 'H3k04me3', 'H3k09me3', 'H3k27me3', 'H3k36me3', 'Input']
+#mark_avail = sp.array([[0, 1, 1, 1, 1, 1, 1],
+#                       [0, 1, 1, 1, 1, 1, 1],
+#                       [0, 1, 1, 1, 1, 1, 1]], dtype = sp.int8)
+
+#mark_avail = sp.ones((3,6), dtype = sp.int8)
+inference_types = ['mf', 'poc', 'pot', 'clique', 'concat', 'loopy', 'gmtk']
 
 
 def main(argv=sys.argv[1:]):
-    """run a variational bayes algorithm"""
+    """run a variational EM algorithm"""
     # parse arguments, then call convert_data or do_inference
     parser = make_parser()
     args = parser.parse_args(argv)
+    args.mark_avail = mark_avail
     if args.func == do_inference:
         # allow patterns on the command line
         all_obs = []
         for obs in args.observe_matrix:
             all_obs.extend(glob.glob(obs))
         args.observe_matrix = all_obs
-        
+
+        if args.approx == 'gmtk':
+            args.subtask = False
+            obs_mat = args.observe_matrix
+            args.observe_matrix = args.observe_matrix[0]
+            init_args_for_inference(args)
+            args.observe_matrix = obs_mat
+            del args.func
+            vb_gmtkExact.mark_avail = mark_avail
+            vb_gmtkExact.run_gmtk_lineagehmm(args)
+            return
+
         if len(args.observe_matrix) > 1:
             print 'parallel inference on %s jobs' % len(args.observe_matrix)
             args.func = do_parallel_inference
@@ -155,7 +245,7 @@ def do_inference(args):
     """Perform the type of inference specified in args"""
     # set up
     if args.quiet_mode:
-        sys.stdout = open('log_%s.log' , 'w')
+        sys.stdout = open('log_%s.log' , 'a')
     init_args_for_inference(args)
     print 'done making args'
     args.out_dir = args.out_dir.format(timestamp=time.strftime('%x_%X').replace('/','-'), **args.__dict__)
@@ -165,10 +255,10 @@ def do_inference(args):
         os.makedirs(args.out_dir)
     except OSError:
         pass
-    
+
     if not args.subtask and args.plot_iter != 0:
         plot_data(args)
-    
+
     for i in xrange(1, args.max_iterations+1):
         if not args.subtask:
             args.iteration = i
@@ -178,7 +268,7 @@ def do_inference(args):
         for j in xrange(1, args.max_E_iter+1 if args.approx != 'clique' else 2):
             args.update_q_func(args)
             if args.approx !='loopy':
-                f = args.free_energy_func(args)
+                f = abs(args.free_energy_func(args))
                 print 'free energy after %s E steps' % j, f
                 try:
                     print abs(args.last_free_energy - f) / args.last_free_energy
@@ -191,7 +281,7 @@ def do_inference(args):
             else:
                 print 'loopy %s E steps' %j
                 if loopy_bp.bp_check_convergence(args):
-                    args.last_free_energy = f = args.free_energy_func(args)
+                    args.last_free_energy = f = abs(args.free_energy_func(args))
                     break
         print '# saving Q distribution'
         if args.save_Q >= 2:
@@ -237,7 +327,7 @@ def do_inference(args):
                 plot_params(args)
                 plot_Q(args)
                 plot_energy(args)
-            
+
             #import ipdb; ipdb.set_trace()
             if args.compare_inf is not None:
                 args.log_obs_mat = sp.zeros((args.I,args.T,args.K), dtype=sp.float64)
@@ -289,14 +379,14 @@ def do_inference(args):
                         if loopy_bp.bp_check_convergence(tmpargs):
                             break
                     print 'loopy convergence after %s iterations' % j
-                    #e = loopy_bp.bp_bethe_free_energy(tmpargs)
-                    e = loopy_bp.bp_mf_free_energy(tmpargs)
+                    e = loopy_bp.bp_bethe_free_energy(tmpargs)
+                    #e = loopy_bp.bp_mf_free_energy(tmpargs)
                     args.cmp_energy['loopy'].append(e)
                 if args.plot_iter != 0:
                     plot_energy_comparison(args)
 
     # save the final parameters and free energy to disk
-    print 'done iteratin'
+    print 'done iteration'
     if args.save_Q >= 1:
         for p in args.Q_to_save:
             sp.save(os.path.join(args.out_dir,
@@ -305,7 +395,7 @@ def do_inference(args):
     for p in args.params_to_save:
         sp.save(os.path.join(args.out_dir, args.out_params.format(param=p, **args.__dict__)),
                 args.__dict__[p])
-    
+
     #pickle.dump(args, os.path.join(args.out_dir, args.out_params.format(param='args', **args.__dict__)))
     print 'done savin'
     if not args.subtask and args.plot_iter != 0:
@@ -326,6 +416,8 @@ def init_args_for_inference(args):
         X = X[:args.max_species, :, :]
     args.X = X
     args.I, args.T, args.L = X.shape
+    match = re.search(r'\.i(\d+)\.', args.observe_matrix)
+    args.real_species_i = int(match.groups()[0]) if match and args.I == 1 else None
     args.free_energy = []
 
     make_tree(args)
@@ -336,8 +428,10 @@ def init_args_for_inference(args):
     #    args.Q_to_save += ['clq_Q', 'clq_Q_pairs']
 
     args.params_to_save = ['free_energy', 'alpha', 'gamma', 'emit_probs', 'emit_sum', 'last_free_energy']
-    if args.approx not in ['clique', 'concat']:
+    if True: #args.approx not in ['clique', 'concat']:
         args.params_to_save += ['theta', 'beta']
+    # if using separate theta    
+
 
     if args.compare_inf is not None:
         if 'all' in args.compare_inf:
@@ -349,22 +443,26 @@ def init_args_for_inference(args):
         print '# loading previous params for warm start from %s' % args.warm_start
         tmpargs = copy.deepcopy(args)
         tmpargs.out_dir = args.warm_start
-        #tmpargs.observe = 'all.npy'
+        tmpargs.observe = 'all.npy'
         args.free_energy, args.theta, args.alpha, args.beta, args.gamma, args.emit_probs, args.emit_sum = load_params(tmpargs)
         try:
             args.free_energy = list(args.free_energy)
         except TypeError: # no previous free energy
             args.free_energy = []
         print 'done'
+	#args.iteration = -1
+	#plot_params(args)
     elif args.subtask:  # params in args already
         print '# using previous params from parallel driver'
     else:
         print '# generating random parameters'
         (args.theta, args.alpha, args.beta, args.gamma, args.emit_probs) = \
-                                                    random_params(args.K,args.L)
+                                                    random_params(args.I, args.K,args.L, args.separate_theta)
 
 
     if args.approx == 'mf':  # mean-field approximation
+        if args.separate_theta:
+           print 'separate_theta not implemented yet for mf' 
         if not args.subtask or args.iteration == 0:
             args.Q = vb_mf.mf_random_q(args.I,args.T,args.K)
         #else:
@@ -379,6 +477,10 @@ def init_args_for_inference(args):
         args.free_energy_func = vb_mf.mf_free_energy
         args.converged_func = vb_mf.mf_check_convergence
     elif args.approx == 'poc':  # product-of-chains approximation
+        if not args.separate_theta:
+            import vb_prodc
+        else:
+            import vb_prodc_sepTheta as vb_prodc
         args.log_obs_mat = sp.zeros((args.I,args.T,args.K), dtype=sp.float64)
         vb_mf.make_log_obs_matrix(args)
         if not args.subtask or args.iteration == 0:
@@ -398,6 +500,8 @@ def init_args_for_inference(args):
     elif args.approx == 'pot':  # product-of-trees approximation
         raise NotImplementedError("Product of Trees is not implemented yet!")
     elif args.approx == 'clique':
+        if args.separate_theta:
+           print 'separate_theta not implemented yet for clique' 
         print 'making cliqued Q'
         args.Q = sp.zeros((args.I, args.T, args.K))
         clique_hmm.clique_init_args(args)
@@ -408,22 +512,27 @@ def init_args_for_inference(args):
     elif args.approx == 'concat':
         raise NotImplementedError("Concatenated HMM is not implemented yet!")
     elif args.approx == 'loopy':
+        if args.separate_theta:
+           print 'separate_theta not implemented yet for clique' 
         if not args.subtask or args.iteration == 0:
             args.Q = vb_mf.mf_random_q(args.I, args.T, args.K)
         #else:
         #    q_path = os.path.join(args.out_dir, args.out_params.format(param='Q', **args.__dict__))
         #    print 'loading previous Q from %s' % q_path
         #    args.Q = sp.load(q_path)
-        args.lmds, args.pis = loopy_bp.bp_initialize_msg(args.I, args.T, args.K, args.vert_children)
+        args.lmds, args.pis = loopy_bp.bp_initialize_msg(args)
         args.log_obs_mat = sp.zeros((args.I,args.T,args.K), dtype=sp.float64)
         vb_mf.make_log_obs_matrix(args)
 
         args.update_q_func = loopy_bp.bp_update_msg_new
         args.update_param_func = loopy_bp.bp_update_params_new
-        #args.free_energy_func = loopy_bp.bp_bethe_free_energy
-        args.free_energy_func = loopy_bp.bp_mf_free_energy
+        args.free_energy_func = loopy_bp.bp_bethe_free_energy
+        #args.free_energy_func = loopy_bp.bp_mf_free_energy
         args.converged_func = loopy_bp.bp_check_convergence
+    elif args.approx == 'gmtk':
+        pass
     else:
+        import ipdb; ipdb.set_trace()
         raise RuntimeError('%s not recognized as valid inference method!' % args.approx)
 
 
@@ -455,8 +564,10 @@ def make_parser():
                         ' the control data')
     convert_parser.add_argument('--outfile', default='observations.npy',
                                 help='Where to save the binarized reads')
+    #convert_parser.add_argument('--bam_template', help='bam file template.',
+    #                default='wgEncodeBroadHistone{species}{mark}StdAlnRep*.bam')
     convert_parser.add_argument('--bam_template', help='bam file template.',
-                    default='wgEncodeBroadHistone{species}{mark}StdAlnRep*.bam')
+                default='/media/cc1667ff-8f28-447a-bab7-767a01f31379/Data/wgEncode*Histone{species}{mark}*AlnRep*.bam')
     convert_parser.set_defaults(func=convert_data)
 
     # to trim off telomeric regions
@@ -541,6 +652,7 @@ def make_parser():
                               help="Whether to save the inferred marginals for hidden variables. 0 => no saving, 1 => save at end, 2 => save at each iteration. 3 => for parallel jobs, reconstruct the chromsomal Q distribution at each iteration. Default: %(default)s")
     infer_parser.add_argument('--quiet_mode', action='store_true', help="Turn off printing for this run")
     infer_parser.add_argument('--run_local', action='store_true', help="Force parallel jobs to run on the local computer, even when SGE is available")
+    infer_parser.add_argument('--separate_theta', action='store_true', help='use a separate theta matrix for each node of the tree (only works for GMTK)')
     infer_parser.set_defaults(func=do_inference)
     return parser
 
@@ -553,7 +665,11 @@ def load_params(args):
 
     #print 'loading from', os.path.join(args.out_dir, args.out_params.format(param='theta', **args.__dict__))
     theta = sp.load(os.path.join(args.out_dir, args.out_params.format(param='theta', **args.__dict__)))
-
+    if len(theta.shape)==3 and args.separate_theta:
+        tmp = sp.zeros((args.I-1, args.K, args.K, args.K), dtype=sp.float64)
+        for i in range(args.I-1):
+            tmp[i,:,:,:] = theta
+        theta = tmp
     #print 'loading from', os.path.join(args.out_dir, args.out_params.format(param='alpha', **args.__dict__))
     alpha = sp.load(os.path.join(args.out_dir, args.out_params.format(param='alpha', **args.__dict__)))
 
@@ -568,7 +684,7 @@ def load_params(args):
 
     #print 'loading from', os.path.join(args.out_dir, args.out_params.format(param='emit_sum', **args.__dict__))
     emit_sum = sp.load(os.path.join(args.out_dir, args.out_params.format(param='emit_sum', **args.__dict__)))
-    
+
     return free_energy, theta, alpha, beta, gamma, emit_probs, emit_sum
 
 def plot_energy_comparison(args):
@@ -585,8 +701,8 @@ def plot_energy_comparison(args):
     pyplot.legend(names,loc='lower right')
     #pyplot.title('Free energy learning with %s' % args.approx)
     formatter = pyplot.ScalarFormatter(useMathText=True)
-    formatter.set_scientific(True) 
-    formatter.set_powerlimits((-3,3)) 
+    formatter.set_scientific(True)
+    formatter.set_powerlimits((-3,3))
     pyplot.gca().yaxis.set_major_formatter(formatter)
     pyplot.xlabel("Iteration")
     pyplot.ylabel('-Free Energy')
@@ -599,11 +715,22 @@ def plot_energy(args):
     pyplot.savefig(os.path.join(args.out_dir, outfile))
     pyplot.figure()
     pyplot.title('Free energy for %s' % args.approx)
-    pyplot.plot([-f for f in args.free_energy])
+    pyplot.plot([-f for f in args.free_energy], label='Current run')
     pyplot.xlabel("iteration")
     pyplot.ylabel('-Free Energy')
     pyplot.savefig(os.path.join(args.out_dir, outfile))
     pyplot.close('all')
+
+    if hasattr(args, 'prev_free_energy'):
+        pyplot.figure()
+        pyplot.title('Free energy for %s' % args.approx)
+        pyplot.plot(range(len(args.prev_free_energy)), [-f for f in args.prev_free_energy], linestyle='-', label='Previous run')
+        pyplot.plot(range(len(args.prev_free_energy), len(args.free_energy) + len(args.prev_free_energy)), [-f for f in args.free_energy], label='Current run')
+        pyplot.legend(loc='lower left')
+        pyplot.xlabel("iteration")
+        pyplot.ylabel('-Free Energy')
+        pyplot.savefig(os.path.join(args.out_dir, (args.out_params + 'vs_previous.png').format(param='free_energy', **args.__dict__)))
+        pyplot.close('all')
 
 def plot_Q(args):
     """Plot Q distribution"""
@@ -701,91 +828,102 @@ def plot_params(args):
 
 
     # theta
-    _, xedges, yedges = sp.histogram2d([0,K], [0,K], bins=[K,K])
-    extent = [xedges[0], xedges[-1], yedges[0], yedges[-1]]
-    if K == 18:
-        numx_plots = 6
-        numy_plots = 3
-    elif K == 15:
-        numx_plots = 5
-        numy_plots = 3
-    else:
-        numx_plots = int(ceil(sp.sqrt(K)))
-        numy_plots = int(ceil(sp.sqrt(K)))
-    matplotlib.rcParams['font.size'] = 8
-    fig, axs = pyplot.subplots(numy_plots, numx_plots, sharex=True, sharey=True, figsize=(numx_plots*2.5,numy_plots*2.5))
-    for k in xrange(K):
-        pltx, plty = k // numx_plots, k % numx_plots
-        #axs[pltx,plty].imshow(args.theta[k,:,:], extent=extent, interpolation='nearest',
-        axs[pltx,plty].imshow(args.theta[:,k,:], extent=extent, interpolation='nearest',
-                      vmin=0, vmax=1, cmap='OrRd', aspect='auto', origin='lower')
-        #if k < numx_plots:
-        #axs[pltx,plty].text(0 + .5, K - .5, 'vp=%s' % (k+1), horizontalalignment='left', verticalalignment='top', fontsize=10)
-        axs[pltx,plty].text(0 + .5, K - .5, 'hp=%s' % (k+1), horizontalalignment='left', verticalalignment='top', fontsize=10)
-        #axs[pltx,plty].xticks(sp.arange(K) + .5, sp.arange(K))
-        #axs[pltx,plty].yticks(sp.arange(K) + .5, sp.arange(K))
-        axs[pltx,plty].set_xticks(sp.arange(K) + .5)
-        axs[pltx,plty].set_xticks(sp.arange(K)+1, minor=True)
-        axs[pltx,plty].set_xticklabels(sp.arange(K) + 1)
-        axs[pltx,plty].set_yticks(sp.arange(K) + .5)
-        axs[pltx,plty].set_yticks(sp.arange(K)+1, minor=True)
-        axs[pltx,plty].set_yticklabels(sp.arange(K) + 1)
-        for line in axs[pltx,plty].yaxis.get_ticklines() + axs[pltx,plty].xaxis.get_ticklines() + axs[pltx,plty].yaxis.get_ticklines(minor=True) + axs[pltx,plty].xaxis.get_ticklines(minor=True):
-            line.set_markersize(0)
-        axs[pltx,plty].grid(True, which='minor', alpha=.2)
-    
-    #fig.suptitle(r"$\Theta$ with fixed parents for {approx} iteration {iteration}".
-    #                    format(approx=args.approx, iteration=args.iteration),
-    #                    fontsize=14, verticalalignment='top')
-    fig.suptitle('Node state', y=.03, fontsize=14, verticalalignment='center')
-    #fig.suptitle('Horizontal parent state', y=.5, x=.02, rotation=90,
-    fig.suptitle('Vertical parent state', y=.5, x=.02, rotation=90,
-                 verticalalignment='center', fontsize=14)
-    matplotlib.rcParams['font.size'] = 6.5
-    fig.subplots_adjust(wspace=.05, hspace=.05, left=.05, right=.95)
-    #b = fig.colorbar(shrink=.9)
-    #b.set_label("Probability")
-    outfile = (args.out_params + '_it{iteration}_vertparent.png').format(param='theta', **args.__dict__)
-    pyplot.savefig(os.path.join(args.out_dir, outfile), dpi=240)
-    
-    
-    fig, axs = pyplot.subplots(numy_plots, numx_plots, sharex=True, sharey=True, figsize=(numx_plots*2.5,numy_plots*2.5))
-    for k in xrange(K):
-        pltx, plty = k // numx_plots, k % numx_plots
-        axs[pltx,plty].imshow(args.theta[k,:,:], extent=extent, interpolation='nearest',
-        #axs[pltx,plty].imshow(args.theta[:,k,:], extent=extent, interpolation='nearest',
-                      vmin=0, vmax=1, cmap='OrRd', aspect='auto', origin='lower')
-        #if k < numx_plots:
-        axs[pltx,plty].text(0 + .5, K - .5, 'vp=%s' % (k+1), horizontalalignment='left', verticalalignment='top', fontsize=10)
-        #axs[pltx,plty].xticks(sp.arange(K) + .5, sp.arange(K))
-        #axs[pltx,plty].yticks(sp.arange(K) + .5, sp.arange(K))
-        axs[pltx,plty].set_xticks(sp.arange(K) + .5)
-        axs[pltx,plty].set_xticks(sp.arange(K)+1, minor=True)
-        axs[pltx,plty].set_xticklabels(sp.arange(K) + 1)
-        axs[pltx,plty].set_yticks(sp.arange(K) + .5)
-        axs[pltx,plty].set_yticks(sp.arange(K)+1, minor=True)
-        axs[pltx,plty].set_yticklabels(sp.arange(K) + 1)
-        for line in axs[pltx,plty].yaxis.get_ticklines() + axs[pltx,plty].xaxis.get_ticklines() + axs[pltx,plty].yaxis.get_ticklines(minor=True) + axs[pltx,plty].xaxis.get_ticklines(minor=True):
-            line.set_markersize(0)
-        axs[pltx,plty].grid(True, which='minor', alpha=.2)
-    
-    #fig.suptitle(r"$\Theta$ with fixed parents for {approx} iteration {iteration}".
-    #                    format(approx=args.approx, iteration=args.iteration),
-    #                    fontsize=14, verticalalignment='top')
-    fig.suptitle('Node state', y=.03, fontsize=14, verticalalignment='center')
-    fig.suptitle('Horizontal parent state', y=.5, x=.02, rotation=90,
-    #fig.suptitle('Vertical parent state', y=.5, x=.02, rotation=90,
-                 verticalalignment='center', fontsize=14)
-    matplotlib.rcParams['font.size'] = 6.5
-    fig.subplots_adjust(wspace=.05, hspace=.05, left=.05, right=.95)
-    #b = fig.colorbar(shrink=.9)
-    #b.set_label("Probability")
-    outfile = (args.out_params + '_it{iteration}.png').format(param='theta', **args.__dict__)
-    pyplot.savefig(os.path.join(args.out_dir, outfile), dpi=240)
+    if args.separate_theta:
+        theta_tmp = args.theta
+        for i in range((args.theta.shape)[0]):
+            setattr(args, 'theta_%s'%(i+1), args.theta[i,:,:,:])
+        delattr(args, 'theta')
+            
+    for theta_name in ['theta'] + ['theta_%s' % i for i in range(20)]:
+        #print 'trying', theta_name
+        if not hasattr(args, theta_name):
+            #print 'missing', theta_name
+            continue
+        _, xedges, yedges = sp.histogram2d([0,K], [0,K], bins=[K,K])
+        extent = [xedges[0], xedges[-1], yedges[0], yedges[-1]]
+        if K == 18:
+            numx_plots = 6
+            numy_plots = 3
+        elif K == 15:
+            numx_plots = 5
+            numy_plots = 3
+        else:
+            numx_plots = int(ceil(sp.sqrt(K)))
+            numy_plots = int(ceil(sp.sqrt(K)))
+        matplotlib.rcParams['font.size'] = 8
+        fig, axs = pyplot.subplots(numy_plots, numx_plots, sharex=True, sharey=True, figsize=(numx_plots*2.5,numy_plots*2.5))
+        for k in xrange(K):
+            pltx, plty = k // numx_plots, k % numx_plots
+            #axs[pltx,plty].imshow(args.theta[k,:,:], extent=extent, interpolation='nearest',
+            axs[pltx,plty].imshow(getattr(args, theta_name)[:,k,:], extent=extent, interpolation='nearest',
+                          vmin=0, vmax=1, cmap='OrRd', aspect='auto', origin='lower')
+            #if k < numx_plots:
+            #axs[pltx,plty].text(0 + .5, K - .5, 'vp=%s' % (k+1), horizontalalignment='left', verticalalignment='top', fontsize=10)
+            axs[pltx,plty].text(0 + .5, K - .5, 'hp=%s' % (k+1), horizontalalignment='left', verticalalignment='top', fontsize=10)
+            #axs[pltx,plty].xticks(sp.arange(K) + .5, sp.arange(K))
+            #axs[pltx,plty].yticks(sp.arange(K) + .5, sp.arange(K))
+            axs[pltx,plty].set_xticks(sp.arange(K) + .5)
+            axs[pltx,plty].set_xticks(sp.arange(K)+1, minor=True)
+            axs[pltx,plty].set_xticklabels(sp.arange(K) + 1)
+            axs[pltx,plty].set_yticks(sp.arange(K) + .5)
+            axs[pltx,plty].set_yticks(sp.arange(K)+1, minor=True)
+            axs[pltx,plty].set_yticklabels(sp.arange(K) + 1)
+            for line in axs[pltx,plty].yaxis.get_ticklines() + axs[pltx,plty].xaxis.get_ticklines() + axs[pltx,plty].yaxis.get_ticklines(minor=True) + axs[pltx,plty].xaxis.get_ticklines(minor=True):
+                line.set_markersize(0)
+            axs[pltx,plty].grid(True, which='minor', alpha=.2)
 
+        #fig.suptitle(r"$\Theta$ with fixed parents for {approx} iteration {iteration}".
+        #                    format(approx=args.approx, iteration=args.iteration),
+        #                    fontsize=14, verticalalignment='top')
+        fig.suptitle('Node state', y=.03, fontsize=14, verticalalignment='center')
+        #fig.suptitle('Horizontal parent state', y=.5, x=.02, rotation=90,
+        fig.suptitle('Vertical parent state', y=.5, x=.02, rotation=90,
+                     verticalalignment='center', fontsize=14)
+        matplotlib.rcParams['font.size'] = 6.5
+        fig.subplots_adjust(wspace=.05, hspace=.05, left=.05, right=.95)
+        #b = fig.colorbar(shrink=.9)
+        #b.set_label("Probability")
+        outfile = (args.out_params + '_it{iteration}_vertparent.png').format(param=theta_name, **args.__dict__)
+        pyplot.savefig(os.path.join(args.out_dir, outfile), dpi=240)
+
+
+        fig, axs = pyplot.subplots(numy_plots, numx_plots, sharex=True, sharey=True, figsize=(numx_plots*2.5,numy_plots*2.5))
+        for k in xrange(K):
+            pltx, plty = k // numx_plots, k % numx_plots
+            axs[pltx,plty].imshow(getattr(args, theta_name)[k,:,:], extent=extent, interpolation='nearest',
+            #axs[pltx,plty].imshow(args.theta[:,k,:], extent=extent, interpolation='nearest',
+                          vmin=0, vmax=1, cmap='OrRd', aspect='auto', origin='lower')
+            #if k < numx_plots:
+            axs[pltx,plty].text(0 + .5, K - .5, 'vp=%s' % (k+1), horizontalalignment='left', verticalalignment='top', fontsize=10)
+            #axs[pltx,plty].xticks(sp.arange(K) + .5, sp.arange(K))
+            #axs[pltx,plty].yticks(sp.arange(K) + .5, sp.arange(K))
+            axs[pltx,plty].set_xticks(sp.arange(K) + .5)
+            axs[pltx,plty].set_xticks(sp.arange(K)+1, minor=True)
+            axs[pltx,plty].set_xticklabels(sp.arange(K) + 1)
+            axs[pltx,plty].set_yticks(sp.arange(K) + .5)
+            axs[pltx,plty].set_yticks(sp.arange(K)+1, minor=True)
+            axs[pltx,plty].set_yticklabels(sp.arange(K) + 1)
+            for line in axs[pltx,plty].yaxis.get_ticklines() + axs[pltx,plty].xaxis.get_ticklines() + axs[pltx,plty].yaxis.get_ticklines(minor=True) + axs[pltx,plty].xaxis.get_ticklines(minor=True):
+                line.set_markersize(0)
+            axs[pltx,plty].grid(True, which='minor', alpha=.2)
+
+        #fig.suptitle(r"$\Theta$ with fixed parents for {approx} iteration {iteration}".
+        #                    format(approx=args.approx, iteration=args.iteration),
+        #                    fontsize=14, verticalalignment='top')
+        fig.suptitle('Node state', y=.03, fontsize=14, verticalalignment='center')
+        fig.suptitle('Horizontal parent state', y=.5, x=.02, rotation=90,
+        #fig.suptitle('Vertical parent state', y=.5, x=.02, rotation=90,
+                     verticalalignment='center', fontsize=14)
+        matplotlib.rcParams['font.size'] = 6.5
+        fig.subplots_adjust(wspace=.05, hspace=.05, left=.05, right=.95)
+        #b = fig.colorbar(shrink=.9)
+        #b.set_label("Probability")
+        outfile = (args.out_params + '_it{iteration}.png').format(param=theta_name, **args.__dict__)
+        pyplot.savefig(os.path.join(args.out_dir, outfile), dpi=240)
+    if vars().has_key('theta_tmp'):
+	setattr(args, 'theta', theta_tmp)
 
     # emission probabilities
-#if True:
     matplotlib.rcParams['font.size'] = 8
     pyplot.figure(figsize=(L/3*1.3,K/3.))
     print (L/3,K/3.)
@@ -808,8 +946,8 @@ def plot_params(args):
     #b.set_label("Probability")
     outfile = (args.out_params + '_it{iteration}.png').format(param='emission', **args.__dict__)
     pyplot.savefig(os.path.join(args.out_dir, outfile), dpi=240)
-    
-    
+
+
     broad_paper_enrichment = sp.array([[16,2,2,6,17,93,99,96,98,2],
                                    [12,2,6,9,53,94,95,14,44,1],
                                    [13,72,0,9,48,78,49,1,10,1],
@@ -870,8 +1008,8 @@ def make_tree(args):
     #tree_by_parents = {0:sp.inf, 1:0}  # 3 species, 2 with one parent
     #tree_by_parents = dict((args.species.index(k), args.species.index(v)) for k, v in phylogeny.items())
     tree_by_parents = dict((valid_species.index(k), valid_species.index(v)) for k, v in phylogeny.items() if valid_species.index(k) in xrange(I) and valid_species.index(v) in xrange(I))
-    tree_by_parents[0] = sp.inf
-    print tree_by_parents
+    tree_by_parents[0] = sp.inf #'Null'
+    print tree_by_parents.keys()
     # [inf, parent(1), parent(2), ...]
     global vert_parent
     #I = max(tree_by_parents) + 1
@@ -879,11 +1017,12 @@ def make_tree(args):
     vert_parent = sp.array([tree_by_parents[c] if c > 0 else I for c in
                                     xrange(I)], dtype=sp.int8)  # error if 0's parent is accessed
     args.vert_parent = vert_parent
-
+    print 'vert_parent', vert_parent
+#    args.vert_parent = tree_by_parents
     # {inf:0, 0:[1,2], 1:[children(1)], ...}
     global vert_children
     vert_children = dict((pa, []) for pa in
-                            tree_by_parents.keys() + tree_by_parents.values())
+                            tree_by_parents.keys())# + tree_by_parents.values())
     for pa in tree_by_parents.values():
         for ch in tree_by_parents.keys():
             if tree_by_parents[ch] == pa:
@@ -896,14 +1035,27 @@ def make_tree(args):
         vert_children[pa] = sp.array(vert_children[pa], dtype=sp.int32)
     args.vert_children = vert_children
 
-def random_params(K, L):
-    """Create and normalize random parameters for Mean-Field inference"""
+#    vert_children = sp.ones(I,  dtype = 'object')
+#    for pa in range(I):
+#        vert_children[pa] = []
+#        for child, parent in tree_by_parents.items():
+#            if pa == parent:
+#                vert_children[pa].append(child)
+#    print vert_children
+#    args.vert_children = vert_children
+
+def random_params(I, K, L, separate_theta):
+    """Create and normalize random parameters for inference"""
     #sp.random.seed([5])
-    theta = sp.rand(K, K, K).astype(sp.float64)
+
     alpha = sp.rand(K, K).astype(sp.float64)
     beta = sp.rand(K, K).astype(sp.float64)
     gamma = sp.rand(K).astype(sp.float64)
     emit_probs = sp.rand(K, L).astype(sp.float64)
+    if separate_theta:
+        theta = sp.rand(I-1, K, K, K).astype(sp.float64)
+    else:
+        theta = sp.rand(K, K, K).astype(sp.float64)
     vb_mf.normalize_trans(theta, alpha, beta, gamma)
     return theta, alpha, beta, gamma, emit_probs
 
@@ -937,20 +1089,20 @@ def split_data(args):
         total_size += X.shape[1]
         #start_ts = xrange(0, X.shape[1], args.chunksize)
         #end_ts = xrange(args.chunksize, X.shape[1] + args.chunksize, args.chunksize)
-        
+
         density = X.sum(axis=0).sum(axis=1)  # sumation over I, then L
         #from ipdb import set_trace; set_trace()
         gk = _gauss_kernel(args.window_size)
         smoothed_density = scipy.signal.convolve(density, gk, mode='same')
         regions_to_keep = smoothed_density >= args.min_reads
-        
+
         # find the regions where a transition is made from no reads to reads, and reads to no reads
         start_ts = sp.where(sp.diff(regions_to_keep.astype(sp.int8)) > 0)[0]
         end_ts = sp.where(sp.diff(regions_to_keep.astype(sp.int8)) < 0)[0]
-        
+
         cur_regions = [r for r in zip(start_ts, end_ts) if r[1] - r[0] >= args.min_size]
         sizes.extend([end_t - start_t for start_t, end_t in cur_regions])
-        
+
         print 'saving %s regions' % len(sizes)
         for chunknum, (start_t, end_t) in enumerate(cur_regions):
             covered_size += end_t - start_t
@@ -964,12 +1116,12 @@ def split_data(args):
     pyplot.hist(sizes, bins=100)
     pyplot.title('chunk sizes for all chroms, min_reads %s, min_size %s, window_size %s' % (args.min_reads, args.min_size, args.window_size))
     pyplot.savefig('chunk_sizes.minreads%s.minsize%s.windowsize%s.png' % (args.min_reads, args.min_size, args.window_size))
-    
+
     pickle.dump(start_positions, open('start_positions.pkl', 'w'))
     # --min_reads .5 --min_size 25 --window_size 200;
 
-    
-        
+
+
 
 def _gauss_kernel(winsize):
     x = sp.mgrid[-int(winsize):int(winsize)+1]
@@ -991,29 +1143,36 @@ def convert_data(args):
             d_files = [f for f in glob.glob(args.bam_template.format(
                                                 species=species, mark=mark))]
             if len(d_files) == 0:
-                raise IOError("No histone data for species %s mark %s Expected: %s" %
+                print("No histone data for species %s mark %s Expected: %s" %
                               (species, mark, args.bam_template.format(
                                                 species=species, mark=mark)))
+
     for i, species in enumerate(args.species):
         for l, mark in enumerate(args.marks):
+
             d_obs = []
             d_files = [f for f in glob.glob(args.bam_template.format(
                                                 species=species, mark=mark))]
-            for mark_file in d_files:
-                d_obs.append(histogram_reads(mark_file, args.windowsize,
-                                             args.chromosomes))
-                print d_obs[-1].sum()
-            d_obs = reduce(operator.add, d_obs)  # add all replicants together
-            #print 'before per million:', d_obs.sum()
-            #d_obs /= (d_obs.sum() / 1e7)  # convert to reads mapping per ten million
-            # convert to a binary array with global poisson
-            genome_rate = d_obs.sum() / float(len(d_obs))
-            print 'after per million', len(d_obs), d_obs.sum(), genome_rate
-            d_obs = call_significant_sites(d_obs, genome_rate, args.max_pvalue)
-            if final_data is None:
-                final_data = sp.zeros((I, len(d_obs), L), dtype=sp.int8)
-            print 'bg_rate', genome_rate, 'total_above', d_obs.sum()
-            final_data[i, :, l] = d_obs
+            if len(d_files) == 0:
+                pass
+            else:
+                for mark_file in d_files:
+                    d_obs.append(histogram_reads(mark_file, args.windowsize,
+                                                 args.chromosomes))
+                    print d_obs[-1].sum()
+                    print d_obs[-1].shape
+                d_obs = reduce(operator.add, d_obs)  # add all replicants together
+                #print 'before per million:', d_obs.sum()
+                #d_obs /= (d_obs.sum() / 1e7)  # convert to reads mapping per ten million
+                # convert to a binary array with global poisson
+                genome_rate = d_obs.sum() / float(len(d_obs))
+                print 'after per million', len(d_obs), d_obs.sum(), genome_rate
+                d_obs = call_significant_sites(d_obs, genome_rate, args.max_pvalue)
+                if final_data is None:
+                    final_data = sp.zeros((I, len(d_obs), L), dtype=sp.int8)
+                print 'bg_rate', genome_rate, 'total_above', d_obs.sum()
+                final_data[i, :, l] = d_obs
+    print "output file:", args.outfile
     with open(args.outfile, 'wb') as outfile:
         sp.save(outfile, final_data)
 
@@ -1067,8 +1226,12 @@ def histogram_reads(bam_file, windowsize, chromosomes='all'):
     if chromosomes == 'all':
         chromosomes = filter(lambda c: c not in ['chrM', 'chrY', 'chrX'],
                              reads_bam.references)
+        actual_chromosomes = list(set(chromosomes)) # uniquefy the chroms
         chrom_lengths = [reads_bam.lengths[reads_bam.references.index(c)]
                                        for c in chromosomes]
+        if len(actual_chromosomes) != len(chromosomes):
+            print 'SANITY CHECK... removing the first half of the chromosome bin for %s' % bam_file
+            chrom_lengths = chrom_lengths[len(chrom_lengths)/2:]
     else:
         chromosomes = filter(lambda c: c not in ['chrM', 'chrY', 'chrX'],
                              chromosomes)
