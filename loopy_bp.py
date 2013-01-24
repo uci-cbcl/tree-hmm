@@ -1,3 +1,10 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Sun Jun 10 10:55:55 2012
+
+@author: yuanfeng wang
+"""
+
 #!/usr/bin/env python
 # loopy BP for learning graphical model of  chromatin modification 
 
@@ -6,7 +13,7 @@ import copy
 from numpy import array, random, diag
 from math import log
 
-from vb_mf import normalize_trans, normalize_emit, make_log_obs_matrix
+from vb_mf import normalize_trans, normalize_emit, make_log_obs_matrix 
 try:
     from ipdb import set_trace as breakpoint
 except ImportError:
@@ -14,22 +21,24 @@ except ImportError:
 #sp.random.seed([10])
 
 
-def bp_initialize_msg(I, T, K, vert_children):
+def bp_initialize_msg(args):
+    I, T, K, vert_children = args.I , args.T, args.K, args.vert_children
     lmds = sp.zeros(I, dtype = object)
     #lmds = [0 for i in range(I)]
     pis = sp.zeros(I, dtype = object)
     # all messages needed to store for the specific tree we have now
-    for i in range(I):
-        lmds[i] = sp.rand(2, T, K)  # lmds[0][0, :,: ] is not used because there is no vertical parent, only horizontal
-        pis[i] = sp.rand(len(vert_children[i])+1, T, K) # i=0 has size (9, T, K), others has size (1, T, K)
-    #lmds = sp.rand(2*I-1, T, K) 
-    #pis = sp.rand(2*I-1, T, K)
+#    for i in range(I):
+#        lmds[i] = sp.rand(2, T, K)  # lmds[0][0, :,: ] is not used because there is no vertical parent, only horizontal
+#        pis[i] = sp.rand(len(vert_children[i])+1, T, K) # i=0 has size (9, T, K), others has size (1, T, K)
+#    #lmds = sp.rand(2*I-1, T, K) 
+#    #pis = sp.rand(2*I-1, T, K)
+#    normalize_msg(lmds, pis)
     
     # breakpoint()
-    normalize_msg(lmds, pis)
     for i in range(I):
-        lmds[i] = sp.ones((2,T,K))
-        pis[i] =  sp.ones((len(vert_children[i])+1, T,K))
+        lmds[i] = sp.ones((2,T+1,K))
+        pis[i] =  sp.ones((len(vert_children[i])+1, T,K))    
+#    print lmds[0].shape
     return lmds, pis
 
 
@@ -38,91 +47,20 @@ def normalize_msg(lmds, pis):
     I = lmds.shape[0]
     
     for i in xrange(I):
-        Im, T, K = lmds[i].shape
+        Im, Tp1, K = lmds[i].shape
         for im in xrange(Im):
-            for t in xrange(T):
+            for t in xrange(Tp1):
                 lmds[i][im,t,:] /= lmds[i][im,t,:].sum()
                 
-        Im, T, K = pis[i].shape
+        Im, T, K = pis[i].shape        
         for im in xrange(Im):
             for t in xrange(T):
                 pis[i][im,t,:] /= pis[i][im,t,:].sum()
 
-def update_msg(lmds, pis, args):
-    vert_children = args.vert_children
-    I, T, L = args.X.shape
-    K = args.gamma.shape[0]
-    emit_probs_mat = sp.exp(args.log_obs_mat)
-    theta, alpha, beta, gamma, emit_probs = args.theta, args.alpha, args.beta, args.gamma, args.emit_probs 
-    
-    lmds_prev = copy.deepcopy(lmds) #sp.copy(lmds)
-    pis_prev = copy.deepcopy(pis) #sp.copy(pis)
-    evidence = evid_allchild(lmds_prev, vert_children)
-    #breakpoint()
-    for i in xrange(I):  # can be parallelized
-        for t in xrange(T):
-            #print i, T
-            #print pis[i][0,t]
-            #print pis_prev[i][0,t] 
-            
-            if i == 0:
-                if t == 0:
-                    # Pi msg to vertical child
-                    for id_vc, vc in enumerate(vert_children[i]):
-                        pis[i][id_vc, t, :] = gamma * emit_probs_mat[0, t, :] * evidence[i,t] / lmds_prev[vc][0,t,:]
-                        
-                    # msg to horizontal child
-                    pis[i][-1, t,:] = gamma * emit_probs_mat[0, t, :] * evidence[i,t] / lmds_prev[i][1,t+1,:]
-                    
-                    # no lambda meessage in this case
-
-                else:  # different than t=0 case : now there is a parent, need to sum over; also there is lambda message
-                    # msg to  (iterate over) vertical child
-                    for id_vc, vc in enumerate(vert_children[i]):
-                        pis[i][id_vc, t,:] = sp.dot(pis_prev[i][-1, t-1,:], alpha) * emit_probs_mat[0, t, :] * evidence[i,t] / lmds_prev[vc][0,t,:] 
-                    # msg to horizontal child
-                    if t < T-1:
-                        pis[i][-1, t,:] = sp.dot(pis_prev[i][-1, t-1,:], alpha) * emit_probs_mat[0, t, :] * evidence[i,t] / lmds_prev[i][1,t+1,:]
-                    
-                    # msg to (in general should iterate over) vertical parent
-                    lmds[i][1, t,:] = sp.dot(alpha, emit_probs_mat[i, t,:]*evidence[i, t])
-           
-
-            else: # case (i>0)
-                # no vertical child, only 1 horizontal child
-                # msg to horizontal child
-                vp = vert_parent[i]
-                #evid_allchild = evidence(lmds_prev, i, t)
-                if t==0:
-                    # in general, should iterate over children
-                    pis[i][0,t,:] = sp.dot(pis_prev[vp][i-1,t,:], beta) * emit_probs_mat[i,t,:] # the i-1 index is a hand-waiving way to do it, in principle should match the index of child species i in pis
-                    # in general, should iterate over parents
-                    lmds[i][0,t,:] = sp.dot(beta, emit_probs_mat[i,t,:]*evidence[i,t])
-                    lmds[i][-1,t,:] = sp.ones(K) #  doesn't matter for there is no horizontal parent
-                else:
-            
-                    tmp = sp.zeros(K)
-                    for k1 in range(K):
-                        for k2 in range(K):
-                            tmp += theta[k1, k2, :] * pis_prev[vp][i-1,t,k1] * pis_prev[i][0, t-1, k2]
-                    pis[i][0,t,:] = tmp * emit_probs_mat[i, 0, :]
-                    #pis[i][-1, t,:] =
-                    
-                    tmp_lmd1= sp.zeros(K)
-                    tmp_lmd2= sp.zeros(K)
-                    for k1 in range(K):
-                        for k2 in range(K):
-                            tmp_lmd1 += theta[:,k1, k2] * pis_prev[i][0, t-1, k2]* emit_probs_mat[i, t, k2] * evidence[i,t,k2]
-                            tmp_lmd2 += theta[k1,:,k2] * pis_prev[vp][i-1, t, k2]* emit_probs_mat[i, t, k2] * evidence[i,t,k2]
-                    lmds[i][0,t,:] = tmp_lmd1
-                    lmds[i][-1,t,:] = tmp_lmd2
-                    
-                    #print tmp.shape
-                    #print tmp_lmd2.shape
-                    
-    normalize_msg(lmds, pis) 
 
 def bp_update_msg_new(args):
+    '''now assume the tree are denoted as vert_PARENTS {1:Null, 2:1, 3:2, ...}, vert_Children {1:2, 2:3 , ...}'''
+    print 'loopy2'    
     lmds, pis = args.lmds, args.pis
     vert_children = args.vert_children
     vert_parent = args.vert_parent
@@ -146,151 +84,183 @@ def bp_update_msg_new(args):
         pis[i][:] = args.pseudocount
     #breakpoint()
     for i in xrange(I):  # can be parallelized
+        vcs = vert_children[i]
+        vp = vert_parent[i]
+        if i != 0:
+            idx_i = vert_children[vp].tolist().index(i)
         for t in xrange(T):
             #print i, T
             #print pis[i][0,t]
-            #print pis_prev[i][0,t] 
-            
-            if i == 0:
-                if t == 0:
-                    # msg to vertical child
-                    for id_vc, vc in enumerate(vert_children[i]):
-                        pis[i][id_vc, t, :] += gamma * emit_probs_mat[0, t, :] * evidence[i,t] / lmds_prev[vc][0,t,:]
-                    # msg to horizontal child
-                    pis[i][-1, t,:] += gamma * emit_probs_mat[0, t, :] * evidence[i,t] / lmds_prev[i][1,t+1,:]
-                    # no lambda meessage in this case
+            #print pis_prev[i][0,t]
+                
+            if i == 0 and t == 0:
+                # msg to vertical child
+                for id_vc, vc in enumerate(vcs):
+                    pis[i][id_vc, t, :] += gamma * emit_probs_mat[0, t, :] * evidence[i,t] / lmds_prev[vc][0,t,:]
+                # msg to horizontal child
+                pis[i][-1, t,:] += gamma * emit_probs_mat[0, t, :] * evidence[i,t] / lmds_prev[i][1,t+1,:]
+                # no lambda meessage in this case
 
-                else:  # different than t=0 case : now there is a parent, need to sum over; also there is lambda message
-                    tmp1, tmp2 = sp.ix_(pis_prev[i][-1, t-1,:], emit_probs_mat[i,t,:] * evidence[i,t,:])
-                    BEL = alpha * (tmp1 * tmp2)
-                    # msg to (iterate over) vertical child
-                    for id_vc, vc in enumerate(vert_children[i]):
-                        pis[i][id_vc, t,:] += sp.dot(BEL, diag(1./lmds_prev[vc][0,t,:])).sum(axis=0)  
-                    # msg to horizontal child
-                    if t < T-1:
-                        pis[i][-1, t,:] += sp.dot(BEL, diag(1./lmds_prev[i][1,t+1,:])).sum(axis=0)
-                    else: 
-                        pis[i][-1, t,:] += BEL.sum(axis=0)
-                        
-                    # msg to horizontal parent
-                    lmds[i][1, t,:] += sp.dot(diag(1/pis_prev[i][-1, t-1,:]), BEL).sum(axis=1)
-                    #breakpoint()
-
-            else: # case (i>0)
-                # msg to horizontal child (no vertical child, only 1 horizontal child, so no need to iterate over)
-                vp = vert_parent[i]
-                #evid_allchild = evidence(lmds_prev, i, t)
-                if t==0:
-                    pis[i][-1,t,:] = sp.dot(pis_prev[vp][i-1,t,:], beta) * emit_probs_mat[i,t,:] # the i-1 index is a hand-waiving way to do it, in principle should match the index of child species i in pis
-                    # in general, should iterate over parents
-                    lmds[i][0,t,:] = sp.dot(beta, emit_probs_mat[i,t,:]*evidence[i,t])
-                    lmds[i][-1,t,:] = sp.ones(K) #  doesn't matter for there is no horizontal parent
+            elif i==0:  # different than t=0 case : now there is a parent, need to sum over; also there is lambda message
+                tmp1, tmp2 = sp.ix_(pis_prev[i][-1, t-1,:], emit_probs_mat[i,t,:] * evidence[i,t,:])
+                BEL = alpha * (tmp1 * tmp2)
+                # msg to (iterate over) vertical child
+                for id_vc, vc in enumerate(vcs):
+                    pis[i][id_vc, t,:] += sp.dot(BEL, diag(1./lmds_prev[vc][0,t,:])).sum(axis=0)  
+#                    tmp = BEL.sum(axis=0) /lmds_prev[vc][0,t,:]
+#                    print pis[i][id_vc, t,:]
+#                    print tmp
+#                    breakpoint()
+                # msg to horizontal child
+                pis[i][-1, t,:] += sp.dot(BEL, diag(1./lmds_prev[i][1,t+1,:])).sum(axis=0)
                     
-                    #tmp1, tmp2 = sp.ix_(pis_prev[vp][i-1,t,:], emit_probs_mat[i,t,:]*evidence[i,t,:])
-                    #BEL = beta * (tmp1 * tmp2)
-                    ## in general, should iterate over children
-                    #pis[i][-1,t,:] += sp.dot(BEL, 1/lmds_prev[i][1,t+1,:]).sum(axis=0) 
-                    ##pis[i][-1,t,:] += (BEL/lmds_prev[i][1,t+1,:].reshape(1,K)).sum(axis=0) 
-                    ## in general, should iterate over parents
-                    #lmds[i][0,t,:] += sp.dot(diag(1/pis_prev[vp][i-1, t,:]), BEL).sum(axis=1)  # The index i-1 is a hand-waiving way to do it, in principle should match the index of child species i in pis
-                    ##lmds[i][0,t,:] += (BEL//pis_prev[vp][i-1, t,:].reshape(K,1)).sum(axis=1)
-                    #lmds[i][1,t,:] += sp.ones(K) #  doesn't matter for there is no horizontal parent
+                # msg to horizontal parent
+                lmds[i][1, t,:] += sp.dot(diag(1/pis_prev[i][-1, t-1,:]), BEL).sum(axis=1)
+                #breakpoint()
 
-                    
+            elif t==0:
+#                    tmp1, tmp2 = sp.ix_(pis_prev[vp][idx_i,t,:], 
+#                    BEL = 
+                if len(vcs) == 0:
+                    pis[i][-1,t,:] += sp.dot(pis_prev[vp][idx_i,t,:], beta) * (emit_probs_mat[i,t,:])
                 else:
-                    #tmp = sp.zeros(K)
-                    #for k1 in range(K):
-                    #    for k2 in range(K):
-                    #        tmp += theta[k1, k2, :] * pis_prev[vp][i-1,t,k1] * pis_prev[i][-1, t-1, k2] * emit_probs_mat[i,t,:]
-                    #pis[i][-1,t,:] = tmp
-                    
-                    tmp1, tmp2, tmp3 = sp.ix_(pis_prev[vp][i-1,t,:], pis_prev[i][-1, t-1, :], emit_probs_mat[i,t,:]*evidence[i,t,:])
-                    BEL = theta* (tmp1* tmp2 * tmp3)
-                    if t < T-1:
-                        pis[i][-1,t,:] += (sp.dot(BEL, 1/lmds_prev[i][1,t+1,:]).sum(axis=0)).sum(axis=0)
-                    else:
-                        pis[i][-1, t,:] += (BEL.sum(axis=0)).sum(axis=0)
+                    pis[i][-1,t,:] += sp.dot(pis_prev[vp][idx_i,t,:], beta) * (emit_probs_mat[i,t,:]* evidence[i,t] /lmds_prev[i][-1,t+1,:]) # only  change: i-1 -> 0 
+                    for id_vc, vc in enumerate(vcs):
+                        pis[i][id_vc, t, :] += sp.dot(pis_prev[vp][idx_i,t,:], beta) * emit_probs_mat[i,t,:] * evidence[i,t] / lmds_prev[vc][0,t,:]
+    #                    pis[i][0,t,:] += sp.dot(pis_prev[vp][idx_i,t,:], beta) * (emit_probs_mat[i,t,:]*lmds_prev[i][-1, t+1,:])
+                # in general, should iterate over parents
+                lmds[i][0,t,:] += sp.dot(beta, emit_probs_mat[i,t,:]*evidence[i,t])
+                lmds[i][1,t,:] += sp.ones(K) #  doesn't matter for there is no horizontal parent
+                
+                #tmp1, tmp2 = sp.ix_(pis_prev[vp][i-1,t,:], emit_probs_mat[i,t,:]*evidence[i,t,:])
+                #BEL = beta * (tmp1 * tmp2)
+                ## in general, should iterate over children
+                #pis[i][-1,t,:] += sp.dot(BEL, 1/lmds_prev[i][1,t+1,:]).sum(axis=0) 
+                ##pis[i][-1,t,:] += (BEL/lmds_prev[i][1,t+1,:].reshape(1,K)).sum(axis=0) 
+                ## in general, should iterate over parents
+                #lmds[i][0,t,:] += sp.dot(diag(1/pis_prev[vp][i-1, t,:]), BEL).sum(axis=1)  # The index i-1 is a hand-waiving way to do it, in principle should match the index of child species i in pis
+                ##lmds[i][0,t,:] += (BEL//pis_prev[vp][i-1, t,:].reshape(K,1)).sum(axis=1)
+                #lmds[i][1,t,:] += sp.ones(K) #  doesn't matter for there is no horizontal parent
 
-                    
-                    #tmp_lmd1= sp.zeros(K)
-                    #tmp_lmd2= sp.zeros(K)
-                    #for k1 in range(K):
-                    #    for k2 in range(K):
-                    #        tmp_lmd1 += theta[:,k1, k2] * pis_prev[i][0, t-1, k2]* emit_probs_mat[i,t,k2] * evidence[i,t,k2]
-                    #        tmp_lmd2 += theta[k1,:,k2] * pis_prev[vp][i-1, t, k2]* emit_probs_mat[i,t,k2] * evidence[i,t,k2]
-                    #print tmp_lmd1
-                    #print tmp_lmd2
-                    
-                    ##lmds[i][0,t,:] += tmp_lmd1
-                    ##lmds[i][1,t,:] += tmp_lmd2
-                    lmds[i][0,t,:] += ((BEL / pis_prev[vp][i-1, t, :].reshape(K,1,1)).sum(axis=1)).sum(axis=1)
-                    lmds[i][1,t,:] += ((BEL / pis_prev[i][-1, t-1, :].reshape(1,K,1)).sum(axis=0)).sum(axis=1)     # t=T is not used
-                    #print lmds[i][0,t,:]
-                    #checked, same as above version (from line 353)
-                    #breakpoint()
+            else:
+                #tmp = sp.zeros(K)
+                #for k1 in range(K):
+                #    for k2 in range(K):
+                #        tmp += theta[k1, k2, :] * pis_prev[vp][i-1,t,k1] * pis_prev[i][-1, t-1, k2] * emit_probs_mat[i,t,:]
+                #pis[i][-1,t,:] = tmp
+                tmp1, tmp2, tmp3 = sp.ix_(pis_prev[vp][idx_i,t,:], pis_prev[i][-1, t-1, :], emit_probs_mat[i,t,:]*evidence[i,t,:])
+                BEL = theta* (tmp1* tmp2 * tmp3)
+                if len(vcs) == 0:
+                    pis[i][-1,t,:] += (BEL.sum(axis=0)).sum(axis=0) /lmds_prev[i][1,t+1,:]  
+#                    breakpoint()
+                else:
+                    pis[i][-1,t,:] += (BEL.sum(axis=0)).sum(axis=0) /lmds_prev[i][1,t+1,:]  
+#                    pis[i][-1,t,:] += (sp.dot(BEL, 1/lmds_prev[i][1,t+1,:]).sum(axis=0)).sum(axis=0)
+                    for id_vc, vc in enumerate(vcs):       
+#                        pis[i][id_vc,t,:] += (sp.dot(BEL, 1/lmds_prev[vc][0,t,:]).sum(axis=0)).sum(axis=0)
+                        pis[i][id_vc,t,:] += (BEL.sum(axis=0)).sum(axis=0) /lmds_prev[vc][0,t,:]
+                
+
+                
+                #tmp_lmd1= sp.zeros(K)
+                #tmp_lmd2= sp.zeros(K)
+                #for k1 in range(K):
+                #    for k2 in range(K):
+                #        tmp_lmd1 += theta[:,k1, k2] * pis_prev[i][0, t-1, k2]* emit_probs_mat[i,t,k2] * evidence[i,t,k2]
+                #        tmp_lmd2 += theta[k1,:,k2] * pis_prev[vp][i-1, t, k2]* emit_probs_mat[i,t,k2] * evidence[i,t,k2]
+                #print tmp_lmd1
+                #print tmp_lmd2
+                
+                ##lmds[i][0,t,:] += tmp_lmd1
+                ##lmds[i][1,t,:] += tmp_lmd2
+                
+#                tmp_lmd1 = ((BEL / pis_prev[vp][idx_i, t, :].reshape(K,1,1)).sum(axis=1)).sum(axis=1)
+#                tmp_lmd2 = ((BEL / pis_prev[i][-1, t-1, :].reshape(1,K,1)).sum(axis=0)).sum(axis=1)     # t=T is not used
+                lmds[i][0,t,:] += (BEL.sum(axis=1)).sum(axis=1) / pis_prev[vp][idx_i, t, :]
+                lmds[i][1,t,:] += (BEL.sum(axis=0)).sum(axis=1) /pis_prev[i][-1, t-1, :]
+                #print lmds[i][0,t,:]
+                #checked, same as above version (from line 353)
+                #breakpoint()
+
     normalize_msg(lmds, pis)
+#    for i in range(I):
+#        print pis[i].shape
+#        print pis[i][0,t,:]
+#        print lmds[i].shape
+#        print lmds[i][0,t,:]
     args.evidence = evid_allchild(lmds, vert_children)
     
     
-def evid_allchild(lmds, vert_children): # could include emit_probs here
+def evid_allchild(lmds, vert_children): 
+    '''calculate the evidence from all children(lambda messages), emit_probs not included'''
     I = lmds.shape[0]
     tmp0, T, K = lmds[0].shape
+    T = T-1
     evidence = sp.ones((I, T, K))
     for i in xrange(I):
-        for t in xrange(T):
-            if i==0:
-                #print 'wrong species index i'
-                #vc = vert_children[i]
+        if len(vert_children[i]) != 0: 
+            for t in xrange(T):                           
+    #            if i==0:
+                    #print 'wrong species index i'
+                    #vc = vert_children[i]
                 tmp = sp.zeros(K)
                 for vc in vert_children[i]:
                     #evidence[i, t] *= lmds[vc][0, t, :]
                     tmp += sp.log(lmds[vc][0, t, :])
-                evidence[i, t] = sp.exp(tmp)
-            if t < T-1:
-                evidence[i, t] *= lmds[i][-1, t+1,:]
+                evidence[i, t] = sp.exp(tmp) * lmds[i][-1, t+1,:]
+                
+#                if t < T-1:
+#                    evidence[i, t] *= lmds[i][-1, t+1,:]
+        else:
+             for t in xrange(T-1):
+                 evidence[i, t] = lmds[i][-1, t+1,:]
     return evidence
 
 
-#def bp_update_params(lmds, pis, args):
-#    vert_parent, vert_children = args.vert_parent, args.vert_children
-#    I, T, L = args.X.shape
-#    K =gamma.shape[0]
-#    theta, alpha, beta, gamma, emit_probs, X = (args.theta, args.alpha, args.beta, args.gamma, args.emit_probs,
-#                                        args.X)
-#    evidence = args.evidence #evid_allchild(lmds, vert_children)
-#    emit_probs_mat = sp.exp(args.log_obs_mat)
-#    
-#    theta[:] = args.pseudocount
-#    alpha[:] = args.pseudocount
-#    beta[:] = args.pseudocount
-#    gamma[:] = args.pseudocount
-#    emit_probs[:] = args.pseudocount
-#    
-#    #support = casual_support(pis)
-#    
-#    emit_sum = sp.zeros(K)
-#    for i in xrange(I):
-#        vp = vert_parent[i]
-#        for t in xrange(T):
-#            for k in xrange(K):
-#                if i==0 and t==0:
-#                    gamma[k] += evidence[i,t,k]
-#                else:
-#                    for v in xrange(K):
-#                        if i == 0:
-#                            alpha[v,k] += pis[i][-1,t-1,v] * evidence[i,t,k] # could use ix_ function
-#                        elif  t == 0:
-#                            beta[v,k] += pis[vp][i-1,t,v] * evidence[i,t,k]
-#                        else:
-#                            for h in xrange(K):
-#                                theta[h,v,k] += pis[vp][i-1,t,h] * pis[i][-1, t-1,v] * evidence[i,t,k]
-#                for l in xrange(L):
-#                    if X[i,t,l]:
-#                        emit_probs[k, l] += evidence[i, t, k]
-#            emit_sum += evidence[i, t]
-#    normalize_trans(theta, alpha, beta, gamma)
-#    emit_probs[:] = sp.dot(sp.diag(1./emit_sum), emit_probs)
-#    args.emit_sum = emit_sum
+def bp_marginal_onenode(lmds, pis, args):
+    """calculate marginal dist. of node i,t"""
+    I, T, L = args.X.shape
+    K = args.gamma.shape[0]
+    marginal = sp.ones((I, T, K))
+    emit_probs_mat  = sp.exp(args.log_obs_mat)
+    emit_probs_mat /= emit_probs_mat.max(axis=2).reshape(I, T, 1)
+    theta, alpha, beta, gamma, emit_probs, X = (args.theta, args.alpha, args.beta, args.gamma, args.emit_probs,
+                                        args.X)
+    evidence = evid_allchild(lmds, args.vert_children)
+    for i in xrange(I):
+        vp = args.vert_parent[i]
+
+        for t in xrange(T):
+            if i==0 and t==0:
+                m = gamma *(emit_probs_mat[i, t, :] *evidence[i,t,:])
+                #tmp1, tmp2 = sp.ix_(pis[i][-1,0,:], evidence[i,t+1,:]*emit_probs_mat[i, t+1, :])
+                #m = (tmp1*tmp2 * alpha).sum(axis=1)
+                #m /= m.sum()
+                #breakpoint()
+            else:
+                if i == 0:
+                    #tmp1, tmp2 = sp.ix_(pis[i][-1,t-1,:], emit_probs_mat[i, t, :]*evidence[i,t,:])
+                    #tmp = alpha *(tmp1*tmp2)
+                    #m = tmp.sum(axis=1)
+                    #print m
+                    tmp = sp.dot(pis[i][-1,t-1,:], alpha)
+                    m = tmp * emit_probs_mat[i, t, :]*evidence[i,t,:]
+             
+                elif t == 0:
+                    tmp = sp.dot(pis[vp][i-1,t,:], beta)
+                    m = tmp* emit_probs_mat[i, t, :]*evidence[i,t,:]
+                    
+                    #tmp1, tmp2 = sp.ix_(pis[vp][i-1,t,:], emit_probs_mat[i, t, :]*evidence[i,t,:])
+                    #tmp = beta *(tmp1*tmp2)
+                    #m = tmp.sum(axis=0)
+                else:
+                    tmp1, tmp2, tmp3 = sp.ix_(pis[vp][i-1,t,:], pis[i][-1, t-1,:], emit_probs_mat[i, t, :]*evidence[i,t,:])
+                    tmp= theta *(tmp1*tmp2*tmp3)
+                    m = (tmp.sum(axis=0)).sum(axis=0)
+                
+            m /= m.sum()
+            marginal[i,t,:] = m
+    return marginal
     
 def bp_update_params_new(args):
     lmds, pis = args.lmds, args.pis
@@ -307,7 +277,7 @@ def bp_update_params_new(args):
     alpha_p = copy.copy(alpha)
     beta_p =  copy.copy(beta)
     theta_p = copy.copy(theta)
-    emit_probs_p = copy.copy(emit_probs)
+#    emit_probs_p = copy.copy(emit_probs)
     
     theta[:] = args.pseudocount
     alpha[:] = args.pseudocount
@@ -321,27 +291,28 @@ def bp_update_params_new(args):
     emit_sum = sp.zeros(K)
     for i in xrange(I):
         vp = vert_parent[i]
+        if i != 0:
+            idx_i = vert_children[vp].tolist().index(i)
         for t in xrange(T):
             if i==0 and t==0:
                 gamma += emit_probs_mat[i, t, :]*evidence[i,t,:]
                 Q = emit_probs_mat[i, t, :]*evidence[i,t,:]
+            elif i == 0:
+                tmp1, tmp2 = sp.ix_(pis[i][-1,t-1,:], emit_probs_mat[i, t, :]*evidence[i,t,:])
+                tmp = alpha_p * (tmp1*tmp2) # belief
+                #tmp /= tmp.sum()
+                Q = tmp.sum(axis=0)
+                alpha += tmp/tmp.sum()
+            elif t == 0:
+                tmp1, tmp2 = sp.ix_(pis[vp][idx_i,t,:], emit_probs_mat[i, t, :]*evidence[i,t,:]) # i-1->0
+                tmp = beta_p *(tmp1*tmp2) # belief
+                Q = tmp.sum(axis=0)
+                beta += tmp/tmp.sum()
             else:
-                if i == 0:
-                    tmp1, tmp2 = sp.ix_(pis[i][-1,t-1,:], emit_probs_mat[i, t, :]*evidence[i,t,:])
-                    tmp = alpha_p * (tmp1*tmp2)
-                    #tmp /= tmp.sum()
-                    Q = tmp.sum(axis=0)
-                    alpha += tmp/tmp.sum()
-                elif t == 0:
-                    tmp1, tmp2 = sp.ix_(pis[vp][i-1,t,:], emit_probs_mat[i, t, :]*evidence[i,t,:])
-                    tmp = beta_p *(tmp1*tmp2)
-                    Q = tmp.sum(axis=0)
-                    beta += tmp/tmp.sum()
-                else:
-                    tmp1, tmp2, tmp3 = sp.ix_(pis[vp][i-1,t,:], pis[i][-1, t-1,:], emit_probs_mat[i, t, :]*evidence[i,t,:])
-                    tmp = theta_p *(tmp1*tmp2 *tmp3)
-                    Q = (tmp.sum(axis=0)).sum(axis=0)
-                    theta += tmp/tmp.sum()
+                tmp1, tmp2, tmp3 = sp.ix_(pis[vp][idx_i,t,:], pis[i][-1, t-1,:], emit_probs_mat[i, t, :]*evidence[i,t,:])
+                tmp = theta_p *(tmp1*tmp2*tmp3) 
+                Q = (tmp.sum(axis=0)).sum(axis=0)
+                theta += tmp/tmp.sum()
                 
             Q /= Q.sum()
             for l in xrange(L):
@@ -407,7 +378,7 @@ def bp_bethe_free_energy(args):
     theta, alpha, beta, gamma, emit_probs, X = (args.theta, args.alpha, args.beta, args.gamma, args.emit_probs,
                         args.X)
     I, T, L = X.shape
-    K = gamma.shape[0]
+#    K = gamma.shape[0]
     free_e = 0.
     #entp = 0.
     log_theta, log_alpha, log_beta, log_gamma = sp.log(theta), sp.log(alpha), sp.log(beta), sp.log(gamma)
@@ -423,6 +394,9 @@ def bp_bethe_free_energy(args):
     #log_emit_probs_mat = sp.zeros((K,T))
     for i in xrange(I):
         vp = vert_parent[i]
+        if i != 0:
+            idx_i = vert_children[vp].tolist().index(i)
+            print vp, idx_i
         log_probs_mat_i = args.log_obs_mat[i,:,:].T
         if i==0:
             Qt =  gamma * emit_probs_mat[i,0,:]*evidence[i,0,:]
@@ -459,7 +433,7 @@ def bp_bethe_free_energy(args):
                 #        free_e += Q_clq[k1,k2] * log(Q_clq[k1,k2])
         else:
             
-            tmp1, tmp2 = sp.ix_(pis[vp][i-1,0,:], emit_probs_mat[i, 0, :]*evidence[i,0,:])
+            tmp1, tmp2 = sp.ix_(pis[vp][idx_i,0,:], emit_probs_mat[i, 0, :]*evidence[i,0,:])
             Q_clq = beta *(tmp1*tmp2)
             Q_clq /= Q_clq.sum()
             Qt = Q_clq.sum(axis=0)
@@ -481,7 +455,7 @@ def bp_bethe_free_energy(args):
             
             #entp += (Q_clq * sp.log(Q_clq)).sum()-(Q * sp.log(Q)).sum()
             for t in xrange(1 ,T):
-                tmp1, tmp2, tmp3 = sp.ix_(pis[vp][i-1,t,:], pis[i][-1, t-1,:], emit_probs_mat[i, t, :]*evidence[i,t,:])
+                tmp1, tmp2, tmp3 = sp.ix_(pis[vp][idx_i,t,:], pis[i][-1, t-1,:], emit_probs_mat[i, t, :]*evidence[i,t,:])
                 Q_clq3 = theta *(tmp1*tmp2*tmp3)
                 Q_clq3 /= Q_clq3.sum()
                 Qt = (Q_clq3.sum(axis=0)).sum(axis=0)
@@ -509,7 +483,9 @@ def bp_bethe_free_energy(args):
     #print 'free energy:', free_e
     return free_e
 
-def bp_mf_free_energy(lmds, pis, args):
+def bp_mf_free_energy(args):
+    lmds, pis = args.lmds, args.pis
+    vert_parent = args.vert_parent
     theta, alpha, beta, gamma, emit_probs, X = (args.theta, args.alpha, args.beta, args.gamma, args.emit_probs,
                         args.X)
     I, T, L = X.shape
