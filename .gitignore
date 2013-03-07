@@ -1,3 +1,8 @@
 *.pyc
 *.c
 *.so
+build
+infer_out
+.project
+.pydevproject
+*.swp
