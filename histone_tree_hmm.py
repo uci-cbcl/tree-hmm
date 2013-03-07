@@ -761,6 +761,7 @@ def make_parser():
                               help="Whether to save the inferred marginals for hidden variables. 0 => no saving, 1 => save at end, 2 => save at each iteration. 3 => for parallel jobs, reconstruct the chromsomal Q distribution at each iteration. Default: %(default)s")
     infer_parser.add_argument('--quiet_mode', action='store_true', help="Turn off printing for this run")
     infer_parser.add_argument('--run_local', action='store_true', help="Force parallel jobs to run on the local computer, even when SGE is available")
+    infer_parser.add_argument('--separate_theta', action='store_true', help='use a separate theta matrix for each node of the tree (only works for GMTK)')
     infer_parser.add_argument('--mark_avail', help='npy matrix of available marks',
                                 default=mark_avail)
     infer_parser.set_defaults(func=do_inference)
