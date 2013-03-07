@@ -19,10 +19,12 @@ def do_parallel_inference(args):
     """Perform inference in parallel on several observations matrices with
     joint parameters
     """
-    from histone_tree_hmm import random_params, do_inference, plot_params, plot_energy, load_params
+    from histone_vb_cython3_gmtk import random_params, do_inference, plot_params, plot_energy, load_params
     from vb_mf import normalize_trans
 
-    args.I, _, args.L = sp.load(args.observe_matrix[0]).shape
+    _x = sp.load(args.observe_matrix[0])
+    args.continuous_observations = _x.dtype != sp.int8
+    args.I, _, args.L = _x.shape
     I = args.I
     K = args.K
     L = args.L
@@ -77,7 +79,7 @@ def do_parallel_inference(args):
         a.quiet_mode = True
         if j % 1000 == 0:
             print j
-    
+
     if args.run_local:
         pool = multiprocessing.Pool()
     else:
@@ -103,14 +105,14 @@ def do_parallel_inference(args):
             args.emit_sum = sp.zeros_like(args.emit_probs, dtype=sp.longdouble)
         else:
             args.emit_sum = sp.zeros((K,L), dtype=sp.longdouble)
-        
+
         if args.run_local:
             iterator = pool.imap_unordered(do_inference, job_args)
             # wait for jobs to finish
             for result in iterator:
                 pass
         else:
-            jobs_handle = pool.map_async(do_inference, job_args, chunksize=11)
+            jobs_handle = pool.map_async(do_inference, job_args, chunksize=12)
             # wait for all jobs to finish
             for j in jobs_handle:
                 j.wait()
@@ -140,11 +142,12 @@ def do_parallel_inference(args):
             print 'converged. free energy diff:', args.free_energy, abs(args.free_energy[-2] - args.free_energy[-1]) / args.free_energy[-2]
             converged = True
         normalize_trans(args.theta, args.alpha, args.beta, args.gamma)
-        if True: #args.approx == 'clique':
-            #print 'clique emit renorm'
-            args.emit_probs[:] = args.emit_probs / args.emit_sum
-        else:
-            args.emit_probs[:] = sp.dot(sp.diag(1./args.emit_sum), args.emit_probs)
+        #if True: #args.approx == 'clique':
+        #    #print 'clique emit renorm'
+        #    args.emit_probs[:] = args.emit_probs / args.emit_sum
+        #else:
+        #    args.emit_probs[:] = sp.dot(sp.diag(1./args.emit_sum), args.emit_probs)
+	    args.emit_probs[:] = sp.dot(sp.diag(1./args.emit_sum), args.emit_probs)
         for a in job_args:
             a.theta, a.alpha, a.beta, a.gamma, a.emit_probs, a.emit_sum = args.theta, args.alpha, args.beta, args.gamma, args.emit_probs, args.emit_sum
 
