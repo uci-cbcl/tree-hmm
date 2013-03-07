@@ -262,7 +262,7 @@ def bp_marginal_onenode(lmds, pis, args):
             marginal[i,t,:] = m
     return marginal
     
-def bp_update_params_new(args):
+def bp_update_params_new(args, renormalize=True):
     lmds, pis = args.lmds, args.pis
     vert_parent, vert_children = args.vert_parent, args.vert_children
     #print  pis[0].shape
@@ -288,7 +288,7 @@ def bp_update_params_new(args):
     #evidence = evid_allchild(lmds, args.vert_children)
     ##support = casual_support(pis)
     
-    emit_sum = sp.zeros(K)
+    emit_sum = sp.zeros((K, L))
     for i in xrange(I):
         vp = vert_parent[i]
         if i != 0:
@@ -316,11 +316,12 @@ def bp_update_params_new(args):
                 
             Q /= Q.sum()
             for l in xrange(L):
-                if X[i,t,l]:
+                if args.mark_avail[i,l] and X[i,t,l]:
                     emit_probs[:, l] += Q
-            emit_sum += Q
-    normalize_trans(theta, alpha, beta, gamma)
-    emit_probs[:] = sp.dot(sp.diag(1./emit_sum), emit_probs)
+                emit_sum[:,l] += Q
+    if renormalize:
+        normalize_trans(theta, alpha, beta, gamma)
+        emit_probs[:] = sp.dot(sp.diag(1./emit_sum), emit_probs)
     args.emit_sum = emit_sum
     make_log_obs_matrix(args)
     

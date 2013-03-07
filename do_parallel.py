@@ -8,9 +8,9 @@ import os
 import tempfile
 import time
 
-#try:
+# try:
 #    from ipdb import set_trace as breakpoint
-#except ImportError:
+# except ImportError:
 #    from pdb import set_trace as breakpoint
 
 import sge
@@ -19,7 +19,7 @@ def do_parallel_inference(args):
     """Perform inference in parallel on several observations matrices with
     joint parameters
     """
-    from histone_vb_cython3_gmtk import random_params, do_inference, plot_params, plot_energy, load_params
+    from histone_tree_hmm import random_params, do_inference, plot_params, plot_energy, load_params
     from vb_mf import normalize_trans
 
     _x = sp.load(args.observe_matrix[0])
@@ -32,9 +32,9 @@ def do_parallel_inference(args):
     args.free_energy = []
     args.observe = 'all.npy'
     args.last_free_energy = 0
-    args.emit_sum = 0
+    args.emit_sum = sp.zeros((K, L), dtype=sp.longdouble)
 
-    args.out_dir = args.out_dir.format(timestamp=time.strftime('%x_%X').replace('/','-'), **args.__dict__)
+    args.out_dir = args.out_dir.format(timestamp=time.strftime('%x_%X').replace('/', '-'), **args.__dict__)
     try:
         print 'making', args.out_dir
         os.makedirs(args.out_dir)
@@ -42,8 +42,8 @@ def do_parallel_inference(args):
         pass
 
     if args.warm_start:
-        #args.last_free_energy, args.theta, args.alpha, args.beta, args.gamma, args.emit_probs, args.emit_sum = load_params(args)
-        #args.warm_start = False
+        # args.last_free_energy, args.theta, args.alpha, args.beta, args.gamma, args.emit_probs, args.emit_sum = load_params(args)
+        # args.warm_start = False
         print '# loading previous params for warm start from %s' % args.warm_start
         tmpargs = copy.deepcopy(args)
         tmpargs.out_dir = args.warm_start
@@ -52,7 +52,7 @@ def do_parallel_inference(args):
 
         try:
             args.free_energy = list(args.free_energy)
-        except TypeError: # no previous free energy
+        except TypeError:  # no previous free energy
             args.free_energy = []
         print 'done'
         args.warm_start = False
@@ -88,23 +88,23 @@ def do_parallel_inference(args):
 
     converged = False
     for args.iteration in range(args.max_iterations):
-        #import ipdb; ipdb.set_trace()
+        # import ipdb; ipdb.set_trace()
         # fresh parameters-- to be aggregated after jobs are run
         print 'iteration', args.iteration
         total_free = 0
         if args.separate_theta:
-            args.theta = sp.zeros((I-1,K,K,K), dtype=sp.longdouble)
+            args.theta = sp.zeros((I - 1, K, K, K), dtype=sp.longdouble)
         else:
-            args.theta = sp.zeros((K,K,K), dtype=sp.longdouble)
+            args.theta = sp.zeros((K, K, K), dtype=sp.longdouble)
 
-        args.alpha = sp.zeros((K,K), dtype=sp.longdouble)
-        args.beta = sp.zeros((K,K), dtype=sp.longdouble)
+        args.alpha = sp.zeros((K, K), dtype=sp.longdouble)
+        args.beta = sp.zeros((K, K), dtype=sp.longdouble)
         args.gamma = sp.zeros((K), dtype=sp.longdouble)
-        args.emit_probs = sp.zeros((K,L), dtype=sp.longdouble)
-        if True:#args.approx == 'clique':
+        args.emit_probs = sp.zeros((K, L), dtype=sp.longdouble)
+        if True:  # args.approx == 'clique':
             args.emit_sum = sp.zeros_like(args.emit_probs, dtype=sp.longdouble)
         else:
-            args.emit_sum = sp.zeros((K,L), dtype=sp.longdouble)
+            args.emit_sum = sp.zeros((K, L), dtype=sp.longdouble)
 
         if args.run_local:
             iterator = pool.imap_unordered(do_inference, job_args)
@@ -119,9 +119,9 @@ def do_parallel_inference(args):
 
         # sum free energies and parameters from jobs
         for a in job_args:
-            #print '# loading from %s' % a.observe
+            # print '# loading from %s' % a.observe
             free_energy, theta, alpha, beta, gamma, emit_probs, emit_sum = load_params(a)
-            #print 'free energy for this part:', free_energy
+            # print 'free energy for this part:', free_energy
             if len(free_energy) > 0:
                 last_free_energy = free_energy[-1]
             else:
@@ -142,18 +142,21 @@ def do_parallel_inference(args):
             print 'converged. free energy diff:', args.free_energy, abs(args.free_energy[-2] - args.free_energy[-1]) / args.free_energy[-2]
             converged = True
         normalize_trans(args.theta, args.alpha, args.beta, args.gamma)
-        #if True: #args.approx == 'clique':
+        # if True: #args.approx == 'clique':
         #    #print 'clique emit renorm'
         #    args.emit_probs[:] = args.emit_probs / args.emit_sum
-        #else:
+        # else:
         #    args.emit_probs[:] = sp.dot(sp.diag(1./args.emit_sum), args.emit_probs)
-	    args.emit_probs[:] = sp.dot(sp.diag(1./args.emit_sum), args.emit_probs)
+        args.emit_probs[:] = sp.dot(sp.diag(1. / args.emit_sum), args.emit_probs)
         for a in job_args:
             a.theta, a.alpha, a.beta, a.gamma, a.emit_probs, a.emit_sum = args.theta, args.alpha, args.beta, args.gamma, args.emit_probs, args.emit_sum
 
-        for p in ['free_energy', 'theta', 'alpha', 'beta', 'gamma', 'emit_probs','lmd','tau']:
-            sp.save(os.path.join(args.out_dir, args.out_params.format(param=p, **args.__dict__)),
-                args.__dict__[p])
+        for p in ['free_energy', 'theta', 'alpha', 'beta', 'gamma', 'emit_probs', 'lmd', 'tau']:
+            try:
+                sp.save(os.path.join(args.out_dir, args.out_params.format(param=p, **args.__dict__)),
+                        args.__dict__[p])
+            except KeyError:
+                pass
         plot_params(args)
         plot_energy(args)
 
