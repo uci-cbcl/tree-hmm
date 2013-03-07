@@ -10,12 +10,13 @@ import copy
 cimport numpy as np
 from libc.math cimport exp, log
 
+from scipy.stats import norm
+import time
+
 #ctypedef np.float128_t float_type
 ctypedef long double float_type
+
 #from ipdb import set_trace as breakpoint
-
-
-
 
 @cython.profile(False)
 cpdef inline float_type log_obs(Py_ssize_t i, Py_ssize_t t, Py_ssize_t k, float_type[:,:] emit_probs, np.int8_t[:,:,:] X) nogil:
@@ -30,6 +31,36 @@ cpdef inline float_type log_obs(Py_ssize_t i, Py_ssize_t t, Py_ssize_t k, float_
     return total
 
 
+_norm_pdf_logC = np.log(np.sqrt(2 * np.pi)).astype(np.longdouble)
+def _norm_logpdf(x, loc, scale):
+    x, loc, scale = map(np.asarray, (x, loc, scale))
+    x = (x - loc) * 1.0/scale
+    return -x**2 / 2.0 - _norm_pdf_logC - np.log(scale)
+
+
+
+@cython.profile(False)
+@cython.cdivision(True)
+cpdef inline float_type log_obs_gaussian(Py_ssize_t i, Py_ssize_t t, Py_ssize_t k, float_type[:,:] means, float_type[:,:] variances, float_type[:,:,:] X):
+    """Get the emission probability for the given X[i,t,:] when the parent is in state k"""
+    #val = norm.pdf(X[i,t,:], loc=means[k,:], scale=np.sqrt(variances[k,:]))
+    #val[val <= 5e-5] = 5e-5
+    ##if (np.any(norm.pdf(X[i,t,:], loc=means[k,:], scale=np.sqrt(variances[k,:])) <= 0) or
+    ##        not np.all(np.isfinite(val))):
+    ##    print 'bad number in log_obs_gaussian', i,t,k, '\nmeans = ', means[k,:], '\nvariances = ', variances[k,:], '\npdf = ', norm.pdf(X[i,t,:], loc=means[k,:], scale=np.sqrt(variances[k,:])), '\nlogpdf = ', np.log(norm.pdf(X[i,t,:], loc=means[k,:], scale=np.sqrt(variances[k,:])))
+    ##    time.sleep(.01)
+    #return np.log(val).sum()
+
+    #val = norm.logpdf(X[i,t,:], loc=means[k,:], scale=np.sqrt(variances[k,:], dtype=np.longdouble), dtype=np.longdouble)
+    val = _norm_logpdf(X[i,t,:], loc=means[k,:], scale=np.sqrt(variances[k,:], dtype=np.longdouble))
+
+    #if np.any(val < -50):
+    #    print '********* too low', list(val), i, t, k, list(X[i,t,:]), list(means[k,:]), list(variances[k,:])
+    #    val[val < -50] = -50
+    #if np.any(val == 0.):
+    #    print '********* underflow?', list(val), i, t, k, list(X[i,t,:]), list(means[k,:]), list(variances[k,:])
+    #    val[val == 0.] = -50
+    return val.sum()
 cpdef make_log_obs_matrix(args):
     """Update p(X^i_t|Z^i_t=k, emit_probs) (I,T,K) from current emit_probs"""
     cdef np.ndarray[float_type, ndim=3] log_obs_mat = args.log_obs_mat
@@ -48,6 +79,38 @@ cpdef make_log_obs_matrix(args):
                 #obs_mat_view[i,t,k] = log_obs(i,t,k,emit,X)
                 log_obs_mat[i,t,k] = log_obs(i,t,k,emit,X)
 
+@cython.cdivision(True)
+cpdef make_log_obs_matrix_gaussian(args):
+    """Update p(X^i_t|Z^i_t=k, emit_probs) (I,T,K) from current emit_probs"""
+    cdef np.ndarray[float_type, ndim=3] log_obs_mat = args.log_obs_mat
+    cdef float_type[:,:,:] X = args.X
+    cdef float_type[:,:] means = args.means
+    cdef float_type[:,:] variances = args.variances
+    cdef Py_ssize_t I = X.shape[0], T = X.shape[1], K = means.shape[0]
+    cdef Py_ssize_t i,t,k
+    #log_obs_mat[...] = np.zeros((I,T,K))
+    log_obs_mat[:] = 0.
+    #cdef float_type[:,:,:] obs_mat_view = log_obs_mat
+    print 'making log_obs matrix'
+    #for i in prange(I, nogil=True):
+    for i in xrange(I):
+        for t in xrange(T):
+            for k in xrange(K):
+                #obs_mat_view[i,t,k] = log_obs(i,t,k,emit,X)
+                val = log_obs_gaussian(i,t,k,means, variances,X)
+                if np.isfinite(val) and val < 0. or val > 0.:
+                    log_obs_mat[i,t,k] = val
+                elif not np.isfinite(val):
+                    print '******Infinite value!'
+                    log_obs_mat[i,t,k] = -100.
+                elif val == 0:
+                    print '******log_obs value is == 0 ?', val
+                    log_obs_mat[i,t,k] = -100.  # small... exp(x) = 5e-5
+                    #print 'bad number... Q is ', args.Q[i,t,k]
+                else:
+                    print '*****something else?', val
+                    log_obs_mat[i,t,k] = -100.
+    print 'done'
 
 
 cpdef normalize_trans(np.ndarray[float_type, ndim=3] theta,
@@ -263,15 +326,25 @@ cpdef mf_update_params(args, renormalize=True):
     Q, theta, alpha, beta, gamma, vert_parent, vert_children, log_obs_mat, pseudocount = (
                     args.Q, args.theta, args.alpha, args.beta, args.gamma,
                     args.vert_parent, args.vert_children, args.log_obs_mat, args.pseudocount)
+
     cdef int I = Q.shape[0], T = Q.shape[1], K = Q.shape[2]
     cdef int L = X.shape[2]
     cdef Py_ssize_t i,t,v,h,k,vp,l
     #print 'mf_update_params'
+    if args.continuous_observations:
+        new_means = np.zeros_like(args.means)
+        new_variances = np.zeros_like(args.variances)
+        new_means[:] = pseudocount  # need a pseudocount for mean and variance?
+        new_variances[:] = pseudocount
+        total_q = np.ones((K,L)) * pseudocount
+    else:
+        emit_probs = args.emit_probs
+        emit_probs[:] = pseudocount
     theta[:] = pseudocount
     alpha[:] = pseudocount
     beta[:] = pseudocount
     gamma[:] = pseudocount
-    emit_probs[:] = pseudocount
+
     for i in xrange(I):
     #for i in prange(I, nogil=True):
         vp = vert_parent[i]
@@ -288,14 +361,34 @@ cpdef mf_update_params(args, renormalize=True):
                         else:
                             for h in xrange(K):
                                 theta[v,h,k] += Q[i,t,k] * Q[i,t-1,h] * Q[vp,t,v]
-                for l in xrange(L):
-                    if X[i,t,l]:
-                        emit_probs[k, l] += Q[i, t, k]
+                if not args.continuous_observations:
+                    for l in xrange(L):
+                        if X[i,t,l]:
+                            emit_probs[k, l] += Q[i, t, k]
+    if args.continuous_observations:
+        for i in xrange(I):
+            for t in xrange(T):
+                for k in xrange(K):
+                    for l in xrange(L):
+                        new_means[k,l] += Q[i, t, k] * X[i,t,l]  # expectation of X wrt Q
+                        total_q[k,l] += Q[i,t,k]
+        for i in xrange(I):
+            for t in xrange(T):
+                for k in xrange(K):
+                    for l in xrange(L):
+                        new_variances[k,l] += Q[i, t, k] * (X[i,t,l] - new_means[k,l]) ** 2  # XXX should be new_means?
+        args.means[:] = new_means / total_q
+        args.variances[:] = new_variances / (I * T)
+    else:
+        normalize_emit(Q, emit_probs, pseudocount, args, renormalize)
+
     if renormalize:
         normalize_trans(theta, alpha, beta, gamma)
-    normalize_emit(Q, emit_probs, pseudocount, args, renormalize)
-    
-    make_log_obs_matrix(args)
+
+    if args.continuous_observations:
+        make_log_obs_matrix_gaussian(args)
+    else:
+        make_log_obs_matrix(args)
 
 def mf_check_convergence(args):
     return (np.abs(args.Q_prev - args.Q).max(axis=0) < 1e-3).all()

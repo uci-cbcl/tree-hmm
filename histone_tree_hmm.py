@@ -198,6 +198,10 @@ def do_inference(args):
                     args.last_free_energy = f = args.free_energy_func(args)
                     break
         print '# saving Q distribution'
+        if args.continuous_observations:
+            for k in range(args.K):
+                print 'means[%s,:] = ' % k, args.means[k,:]
+                print 'stdev[%s,:] = ' % k, sp.sqrt(args.variances[k,:])
         if args.save_Q >= 2:
             for p in args.Q_to_save:
                 sp.save(os.path.join(args.out_dir,
@@ -244,7 +248,7 @@ def do_inference(args):
             
             #import ipdb; ipdb.set_trace()
             if args.compare_inf is not None:
-                args.log_obs_mat = sp.zeros((args.I,args.T,args.K), dtype=sp.float64)
+                args.log_obs_mat = sp.zeros((args.I,args.T,args.K), dtype=float_type)
                 vb_mf.make_log_obs_matrix(args)
                 if 'mf' in args.compare_inf:
                     tmpargs = copy.deepcopy(args)
@@ -293,8 +297,8 @@ def do_inference(args):
                         if loopy_bp.bp_check_convergence(tmpargs):
                             break
                     print 'loopy convergence after %s iterations' % j
-                    #e = loopy_bp.bp_bethe_free_energy(tmpargs)
-                    e = loopy_bp.bp_mf_free_energy(tmpargs)
+                    e = loopy_bp.bp_bethe_free_energy(tmpargs)
+                    #e = loopy_bp.bp_mf_free_energy(tmpargs)
                     args.cmp_energy['loopy'].append(e)
                 if args.plot_iter != 0:
                     plot_energy_comparison(args)
@@ -316,20 +320,32 @@ def do_inference(args):
         plot_energy(args)
         plot_params(args)
         plot_Q(args)
-        scipy.io.savemat('poc_inferred_params_K{K}_{T}.mat'.format(K=args.K, T=args.max_bins), dict(alpha = args.alpha, theta=args.theta, beta=args.beta, gamma=args.gamma, emit_probs=args.emit_probs))
+        #scipy.io.savemat('poc_inferred_params_K{K}_{T}.mat'.format(K=args.K, T=args.max_bins), dict(alpha = args.alpha, theta=args.theta, beta=args.beta, gamma=args.gamma, emit_probs=args.emit_probs))
 
 
 def init_args_for_inference(args):
     """Initialize args with inference variables according to learning method"""
     # read in the datafiles to X array
     print '# loading observations'
-    X = sp.load(args.observe_matrix).astype(sp.int8)
+    X = sp.load(args.observe_matrix)
     if args.max_bins is not None:
         X = X[:, :args.max_bins, :]
     if args.max_species is not None:
         X = X[:args.max_species, :, :]
     args.X = X
     args.I, args.T, args.L = X.shape
+    if args.X.dtype != scipy.int8:
+        args.continuous_observations = True
+        print 'Inference for continuous observations'
+        args.X = X.astype(float_type)
+        #args.means = sp.rand(args.K, args.L)
+        #args.variances = sp.rand(args.K, args.L)
+        args.means, args.variances = initialize_mean_variance(args)
+    else:
+        args.continuous_observations = False
+        print 'Inference for discrete observations'
+    match = re.search(r'\.i(\d+)\.', args.observe_matrix)
+    args.real_species_i = int(match.groups()[0]) if match and args.I == 1 else None
     args.free_energy = []
 
     make_tree(args)
@@ -339,9 +355,13 @@ def init_args_for_inference(args):
     #elif args.approx == 'clique':
     #    args.Q_to_save += ['clq_Q', 'clq_Q_pairs']
 
-    args.params_to_save = ['free_energy', 'alpha', 'gamma', 'emit_probs', 'emit_sum', 'last_free_energy']
-    if args.approx not in ['clique', 'concat']:
+    args.params_to_save = ['free_energy', 'alpha', 'gamma', 'last_free_energy']
+    if True: #args.approx not in ['clique', 'concat']:
         args.params_to_save += ['theta', 'beta']
+    if args.continuous_observations:
+        args.params_to_save += ['means', 'variances']
+    else:
+        args.params_to_save += ['emit_probs', 'emit_sum']
 
     if args.compare_inf is not None:
         if 'all' in args.compare_inf:
@@ -353,19 +373,24 @@ def init_args_for_inference(args):
         print '# loading previous params for warm start from %s' % args.warm_start
         tmpargs = copy.deepcopy(args)
         tmpargs.out_dir = args.warm_start
-        #tmpargs.observe = 'all.npy'
+        tmpargs.observe = 'all.npy'
         args.free_energy, args.theta, args.alpha, args.beta, args.gamma, args.emit_probs, args.emit_sum = load_params(tmpargs)
         try:
             args.free_energy = list(args.free_energy)
         except TypeError: # no previous free energy
             args.free_energy = []
         print 'done'
+        #import pdb; pdb.set_trace()
+	#args.iteration = -1
+	#plot_params(args)
     elif args.subtask:  # params in args already
         print '# using previous params from parallel driver'
     else:
         print '# generating random parameters'
         (args.theta, args.alpha, args.beta, args.gamma, args.emit_probs) = \
                                                     random_params(args.K,args.L)
+        if args.continuous_observations:
+            del args.emit_probs
 
 
     if args.approx == 'mf':  # mean-field approximation
@@ -384,10 +409,15 @@ def init_args_for_inference(args):
         args.converged_func = vb_mf.mf_check_convergence
     elif args.approx == 'poc':  # product-of-chains approximation
         args.log_obs_mat = sp.zeros((args.I,args.T,args.K), dtype=float_type)
+        if args.continuous_observations:
+            vb_mf.make_log_obs_matrix_gaussian(args)
+        else:
+            vb_mf.make_log_obs_matrix(args)
+
         if not args.subtask or args.iteration == 0:
             print '# generating Qs'
             args.Q, args.Q_pairs = vb_prodc.prodc_initialize_qs(args.theta, args.alpha, args.beta,
-                                            args.gamma, args.emit_probs, args.X, args.log_obs_mat)
+                                            args.gamma, args.X, args.log_obs_mat)
         #else:
         #    q_path = os.path.join(args.out_dir, args.out_params.format(param='Q', **args.__dict__))
         #    print 'loading previous Q from %s' % q_path
@@ -423,8 +453,8 @@ def init_args_for_inference(args):
 
         args.update_q_func = loopy_bp.bp_update_msg_new
         args.update_param_func = loopy_bp.bp_update_params_new
-        #args.free_energy_func = loopy_bp.bp_bethe_free_energy
-        args.free_energy_func = loopy_bp.bp_mf_free_energy
+        args.free_energy_func = loopy_bp.bp_bethe_free_energy
+        #args.free_energy_func = loopy_bp.bp_mf_free_energy
         args.converged_func = loopy_bp.bp_check_convergence
     else:
         raise RuntimeError('%s not recognized as valid inference method!' % args.approx)
@@ -658,7 +688,7 @@ def plot_params(args):
     pyplot.figure()
     _, xedges, yedges = sp.histogram2d([0,K], [0,K], bins=[K,K])
     extent = [xedges[0], xedges[-1], yedges[0], yedges[-1]]
-    pyplot.imshow(args.alpha, extent=extent, interpolation='nearest',
+    pyplot.imshow(args.alpha.astype(sp.float64), extent=extent, interpolation='nearest',
                   vmin=0, vmax=1,  cmap='OrRd', origin='lower')
     pyplot.xticks(sp.arange(K) + .5, sp.arange(K)+1)
     pyplot.gca().set_xticks(sp.arange(K)+1, minor=True)
@@ -683,7 +713,7 @@ def plot_params(args):
     _, xedges, yedges = sp.histogram2d([0,K], [0,K], bins=[K,K])
     extent = [xedges[0], xedges[-1], yedges[0], yedges[-1]]
     pyplot.clf()
-    pyplot.imshow(args.beta, extent=extent, interpolation='nearest',
+    pyplot.imshow(args.beta.astype(sp.float64), extent=extent, interpolation='nearest',
                   vmin=0, vmax=1, cmap='OrRd', origin='lower')
     pyplot.xticks(sp.arange(K) + .5, sp.arange(K)+1)
     pyplot.gca().set_xticks(sp.arange(K)+1, minor=True)
@@ -704,162 +734,214 @@ def plot_params(args):
 
 
     # theta
-    _, xedges, yedges = sp.histogram2d([0,K], [0,K], bins=[K,K])
-    extent = [xedges[0], xedges[-1], yedges[0], yedges[-1]]
-    if K == 18:
-        numx_plots = 6
-        numy_plots = 3
-    elif K == 15:
-        numx_plots = 5
-        numy_plots = 3
-    else:
-        numx_plots = int(ceil(sp.sqrt(K)))
-        numy_plots = int(ceil(sp.sqrt(K)))
-    matplotlib.rcParams['font.size'] = 8
-    fig, axs = pyplot.subplots(numy_plots, numx_plots, sharex=True, sharey=True, figsize=(numx_plots*2.5,numy_plots*2.5))
-    for k in xrange(K):
-        pltx, plty = k // numx_plots, k % numx_plots
-        #axs[pltx,plty].imshow(args.theta[k,:,:], extent=extent, interpolation='nearest',
-        axs[pltx,plty].imshow(args.theta[:,k,:], extent=extent, interpolation='nearest',
-                      vmin=0, vmax=1, cmap='OrRd', aspect='auto', origin='lower')
-        #if k < numx_plots:
-        #axs[pltx,plty].text(0 + .5, K - .5, 'vp=%s' % (k+1), horizontalalignment='left', verticalalignment='top', fontsize=10)
-        axs[pltx,plty].text(0 + .5, K - .5, 'hp=%s' % (k+1), horizontalalignment='left', verticalalignment='top', fontsize=10)
-        #axs[pltx,plty].xticks(sp.arange(K) + .5, sp.arange(K))
-        #axs[pltx,plty].yticks(sp.arange(K) + .5, sp.arange(K))
-        axs[pltx,plty].set_xticks(sp.arange(K) + .5)
-        axs[pltx,plty].set_xticks(sp.arange(K)+1, minor=True)
-        axs[pltx,plty].set_xticklabels(sp.arange(K) + 1)
-        axs[pltx,plty].set_yticks(sp.arange(K) + .5)
-        axs[pltx,plty].set_yticks(sp.arange(K)+1, minor=True)
-        axs[pltx,plty].set_yticklabels(sp.arange(K) + 1)
-        for line in axs[pltx,plty].yaxis.get_ticklines() + axs[pltx,plty].xaxis.get_ticklines() + axs[pltx,plty].yaxis.get_ticklines(minor=True) + axs[pltx,plty].xaxis.get_ticklines(minor=True):
-            line.set_markersize(0)
-        axs[pltx,plty].grid(True, which='minor', alpha=.2)
-    
-    #fig.suptitle(r"$\Theta$ with fixed parents for {approx} iteration {iteration}".
-    #                    format(approx=args.approx, iteration=args.iteration),
-    #                    fontsize=14, verticalalignment='top')
-    fig.suptitle('Node state', y=.03, fontsize=14, verticalalignment='center')
-    #fig.suptitle('Horizontal parent state', y=.5, x=.02, rotation=90,
-    fig.suptitle('Vertical parent state', y=.5, x=.02, rotation=90,
-                 verticalalignment='center', fontsize=14)
-    matplotlib.rcParams['font.size'] = 6.5
-    fig.subplots_adjust(wspace=.05, hspace=.05, left=.05, right=.95)
-    #b = fig.colorbar(shrink=.9)
-    #b.set_label("Probability")
-    outfile = (args.out_params + '_it{iteration}_vertparent.png').format(param='theta', **args.__dict__)
-    pyplot.savefig(os.path.join(args.out_dir, outfile), dpi=240)
-    
-    
-    fig, axs = pyplot.subplots(numy_plots, numx_plots, sharex=True, sharey=True, figsize=(numx_plots*2.5,numy_plots*2.5))
-    for k in xrange(K):
-        pltx, plty = k // numx_plots, k % numx_plots
-        axs[pltx,plty].imshow(args.theta[k,:,:], extent=extent, interpolation='nearest',
-        #axs[pltx,plty].imshow(args.theta[:,k,:], extent=extent, interpolation='nearest',
-                      vmin=0, vmax=1, cmap='OrRd', aspect='auto', origin='lower')
-        #if k < numx_plots:
-        axs[pltx,plty].text(0 + .5, K - .5, 'vp=%s' % (k+1), horizontalalignment='left', verticalalignment='top', fontsize=10)
-        #axs[pltx,plty].xticks(sp.arange(K) + .5, sp.arange(K))
-        #axs[pltx,plty].yticks(sp.arange(K) + .5, sp.arange(K))
-        axs[pltx,plty].set_xticks(sp.arange(K) + .5)
-        axs[pltx,plty].set_xticks(sp.arange(K)+1, minor=True)
-        axs[pltx,plty].set_xticklabels(sp.arange(K) + 1)
-        axs[pltx,plty].set_yticks(sp.arange(K) + .5)
-        axs[pltx,plty].set_yticks(sp.arange(K)+1, minor=True)
-        axs[pltx,plty].set_yticklabels(sp.arange(K) + 1)
-        for line in axs[pltx,plty].yaxis.get_ticklines() + axs[pltx,plty].xaxis.get_ticklines() + axs[pltx,plty].yaxis.get_ticklines(minor=True) + axs[pltx,plty].xaxis.get_ticklines(minor=True):
-            line.set_markersize(0)
-        axs[pltx,plty].grid(True, which='minor', alpha=.2)
-    
-    #fig.suptitle(r"$\Theta$ with fixed parents for {approx} iteration {iteration}".
-    #                    format(approx=args.approx, iteration=args.iteration),
-    #                    fontsize=14, verticalalignment='top')
-    fig.suptitle('Node state', y=.03, fontsize=14, verticalalignment='center')
-    fig.suptitle('Horizontal parent state', y=.5, x=.02, rotation=90,
-    #fig.suptitle('Vertical parent state', y=.5, x=.02, rotation=90,
-                 verticalalignment='center', fontsize=14)
-    matplotlib.rcParams['font.size'] = 6.5
-    fig.subplots_adjust(wspace=.05, hspace=.05, left=.05, right=.95)
-    #b = fig.colorbar(shrink=.9)
-    #b.set_label("Probability")
-    outfile = (args.out_params + '_it{iteration}.png').format(param='theta', **args.__dict__)
-    pyplot.savefig(os.path.join(args.out_dir, outfile), dpi=240)
+    for theta_name in ['theta'] + ['theta_%s' % i for i in range(20)]:
+        #print 'trying', theta_name
+        if not hasattr(args, theta_name):
+            #print 'missing', theta_name
+            continue
+        _, xedges, yedges = sp.histogram2d([0,K], [0,K], bins=[K,K])
+        extent = [xedges[0], xedges[-1], yedges[0], yedges[-1]]
+        if K == 18:
+            numx_plots = 6
+            numy_plots = 3
+        elif K == 15:
+            numx_plots = 5
+            numy_plots = 3
+        else:
+            numx_plots = int(ceil(sp.sqrt(K)))
+            numy_plots = int(ceil(sp.sqrt(K)))
+        matplotlib.rcParams['font.size'] = 8
+        fig, axs = pyplot.subplots(numy_plots, numx_plots, sharex=True, sharey=True, figsize=(numx_plots*2.5,numy_plots*2.5))
+        for k in xrange(K):
+            pltx, plty = k // numx_plots, k % numx_plots
+            #axs[pltx,plty].imshow(args.theta[k,:,:], extent=extent, interpolation='nearest',
+            axs[pltx,plty].imshow(getattr(args, theta_name)[:,k,:].astype(sp.float64), extent=extent, interpolation='nearest',
+                          vmin=0, vmax=1, cmap='OrRd', aspect='auto', origin='lower')
+            #if k < numx_plots:
+            #axs[pltx,plty].text(0 + .5, K - .5, 'vp=%s' % (k+1), horizontalalignment='left', verticalalignment='top', fontsize=10)
+            axs[pltx,plty].text(0 + .5, K - .5, 'hp=%s' % (k+1), horizontalalignment='left', verticalalignment='top', fontsize=10)
+            #axs[pltx,plty].xticks(sp.arange(K) + .5, sp.arange(K))
+            #axs[pltx,plty].yticks(sp.arange(K) + .5, sp.arange(K))
+            axs[pltx,plty].set_xticks(sp.arange(K) + .5)
+            axs[pltx,plty].set_xticks(sp.arange(K)+1, minor=True)
+            axs[pltx,plty].set_xticklabels(sp.arange(K) + 1)
+            axs[pltx,plty].set_yticks(sp.arange(K) + .5)
+            axs[pltx,plty].set_yticks(sp.arange(K)+1, minor=True)
+            axs[pltx,plty].set_yticklabels(sp.arange(K) + 1)
+            for line in axs[pltx,plty].yaxis.get_ticklines() + axs[pltx,plty].xaxis.get_ticklines() + axs[pltx,plty].yaxis.get_ticklines(minor=True) + axs[pltx,plty].xaxis.get_ticklines(minor=True):
+                line.set_markersize(0)
+            axs[pltx,plty].grid(True, which='minor', alpha=.2)
+
+        #fig.suptitle(r"$\Theta$ with fixed parents for {approx} iteration {iteration}".
+        #                    format(approx=args.approx, iteration=args.iteration),
+        #                    fontsize=14, verticalalignment='top')
+        fig.suptitle('Node state', y=.03, fontsize=14, verticalalignment='center')
+        #fig.suptitle('Horizontal parent state', y=.5, x=.02, rotation=90,
+        fig.suptitle('Vertical parent state', y=.5, x=.02, rotation=90,
+                     verticalalignment='center', fontsize=14)
+        matplotlib.rcParams['font.size'] = 6.5
+        fig.subplots_adjust(wspace=.05, hspace=.05, left=.05, right=.95)
+        #b = fig.colorbar(shrink=.9)
+        #b.set_label("Probability")
+        outfile = (args.out_params + '_vertparent_it{iteration}.png').format(param=theta_name, **args.__dict__)
+        pyplot.savefig(os.path.join(args.out_dir, outfile), dpi=240)
+
+
+        fig, axs = pyplot.subplots(numy_plots, numx_plots, sharex=True, sharey=True, figsize=(numx_plots*2.5,numy_plots*2.5))
+        for k in xrange(K):
+            pltx, plty = k // numx_plots, k % numx_plots
+            axs[pltx,plty].imshow(getattr(args, theta_name)[k,:,:].astype(sp.float64), extent=extent, interpolation='nearest',
+            #axs[pltx,plty].imshow(args.theta[:,k,:], extent=extent, interpolation='nearest',
+                          vmin=0, vmax=1, cmap='OrRd', aspect='auto', origin='lower')
+            #if k < numx_plots:
+            axs[pltx,plty].text(0 + .5, K - .5, 'vp=%s' % (k+1), horizontalalignment='left', verticalalignment='top', fontsize=10)
+            #axs[pltx,plty].xticks(sp.arange(K) + .5, sp.arange(K))
+            #axs[pltx,plty].yticks(sp.arange(K) + .5, sp.arange(K))
+            axs[pltx,plty].set_xticks(sp.arange(K) + .5)
+            axs[pltx,plty].set_xticks(sp.arange(K)+1, minor=True)
+            axs[pltx,plty].set_xticklabels(sp.arange(K) + 1)
+            axs[pltx,plty].set_yticks(sp.arange(K) + .5)
+            axs[pltx,plty].set_yticks(sp.arange(K)+1, minor=True)
+            axs[pltx,plty].set_yticklabels(sp.arange(K) + 1)
+            for line in axs[pltx,plty].yaxis.get_ticklines() + axs[pltx,plty].xaxis.get_ticklines() + axs[pltx,plty].yaxis.get_ticklines(minor=True) + axs[pltx,plty].xaxis.get_ticklines(minor=True):
+                line.set_markersize(0)
+            axs[pltx,plty].grid(True, which='minor', alpha=.2)
+
+        #fig.suptitle(r"$\Theta$ with fixed parents for {approx} iteration {iteration}".
+        #                    format(approx=args.approx, iteration=args.iteration),
+        #                    fontsize=14, verticalalignment='top')
+        fig.suptitle('Node state', y=.03, fontsize=14, verticalalignment='center')
+        fig.suptitle('Horizontal parent state', y=.5, x=.02, rotation=90,
+        #fig.suptitle('Vertical parent state', y=.5, x=.02, rotation=90,
+                     verticalalignment='center', fontsize=14)
+        matplotlib.rcParams['font.size'] = 6.5
+        fig.subplots_adjust(wspace=.05, hspace=.05, left=.05, right=.95)
+        #b = fig.colorbar(shrink=.9)
+        #b.set_label("Probability")
+        outfile = (args.out_params + '_it{iteration}.png').format(param=theta_name, **args.__dict__)
+        pyplot.savefig(os.path.join(args.out_dir, outfile), dpi=240)
 
 
     # emission probabilities
-#if True:
-    matplotlib.rcParams['font.size'] = 8
-    pyplot.figure(figsize=(L/3*1.3,K/3.))
-    print (L/3,K/3.)
-    pyplot.imshow(args.emit_probs, interpolation='nearest', aspect='auto',
-                  vmin=0, vmax=1, cmap='OrRd', origin='lower')
-    for k in range(K):
-        for l in range(L):
-            pyplot.text(l, k, '%2.0f' % (args.emit_probs[k,l] * 100), horizontalalignment='center', verticalalignment='center')
-    pyplot.yticks(sp.arange(K), sp.arange(K)+1)
-    pyplot.gca().set_yticks(sp.arange(K)+.5, minor=True)
-    pyplot.xticks(sp.arange(L), valid_marks, rotation=30, horizontalalignment='right')
-    pyplot.gca().set_xticks(sp.arange(L)+.5, minor=True)
-    pyplot.grid(which='minor', alpha=.2)
-    for line in pyplot.gca().yaxis.get_ticklines() + pyplot.gca().xaxis.get_ticklines() + pyplot.gca().xaxis.get_ticklines(minor=True) + pyplot.gca().yaxis.get_ticklines(minor=True):
-    # label is a Text instance
-        line.set_markersize(0)
-    pyplot.ylabel('Hidden State')
-    pyplot.title("Emission probabilities")
-    #b = pyplot.colorbar(shrink=.7)
-    #b.set_label("Probability")
-    outfile = (args.out_params + '_it{iteration}.png').format(param='emission', **args.__dict__)
-    pyplot.savefig(os.path.join(args.out_dir, outfile), dpi=240)
-    
-    
-    broad_paper_enrichment = sp.array([[16,2,2,6,17,93,99,96,98,2],
-                                   [12,2,6,9,53,94,95,14,44,1],
-                                   [13,72,0,9,48,78,49,1,10,1],
-                                   [11,1,15,11,96,99,75,97,86,4],
-                                   [5,0,10,3,88,57,5,84,25,1],
-                                   [7,1,1,3,58,75,8,6,5,1],
-                                   [2,1,2,1,56,3,0,6,2,1],
-                                   [92,2,1,3,6,3,0,0,1,1],
-                                   [5,0,43,43,37,11,2,9,4,1],
-                                   [1,0,47,3,0,0,0,0,0,1],
-                                   [0,0,3,2,0,0,0,0,0,0],
-                                   [1,27,0,2,0,0,0,0,0,0],
-                                   [0,0,0,0,0,0,0,0,0,0],
-                                   [22,28,19,41,6,5,26,5,13,37],
-                                   [85,85,91,88,76,77,91,73,85,78],
-                                   [float('nan'), float('nan'),float('nan'),float('nan'),float('nan'),float('nan'),float('nan'),float('nan'),float('nan'),float('nan')]
-                                ]) / 100.
-    mapping_from_broad = dict(zip(range(K), (5,2,0,14,4,6,9,1,12,-1,3,12,8,7,10,12,11,13)))
-    broad_paper_enrichment = broad_paper_enrichment[tuple(mapping_from_broad[i] for i in range(K)), :]
-    broad_names = ['Active promoter', 'Weak promoter', 'Inactive/poised promoter', 'Strong enhancer',
-                   'Strong enhancer', 'weak/poised enhancer', 'Weak/poised enhancer', 'Insulator',
-                   'Transcriptional transition', 'Transcriptional elongation', 'Weak transcribed',
-                   'Polycomb repressed', 'Heterochrom; low signal', 'Repetitive/CNV', 'Repetitive/CNV',
-                   'NA', 'NA', 'NA']
-    pyplot.figure(figsize=(L/3,K/3.))
-    print (L/3,K/3.)
-    pyplot.imshow(broad_paper_enrichment, interpolation='nearest', aspect='auto',
-                  vmin=0, vmax=1, cmap='OrRd', origin='lower')
-    for k in range(K):
-        for l in range(L):
-            pyplot.text(l, k, '%2.0f' % (broad_paper_enrichment[k,l] * 100), horizontalalignment='center', verticalalignment='center')
-        pyplot.text(L, k, broad_names[mapping_from_broad[k]], horizontalalignment='left', verticalalignment='center', fontsize=6)
-    pyplot.yticks(sp.arange(K), sp.arange(K)+1)
-    pyplot.gca().set_yticks(sp.arange(K)+.5, minor=True)
-    pyplot.xticks(sp.arange(L), valid_marks, rotation=30, horizontalalignment='right')
-    pyplot.gca().set_xticks(sp.arange(L)+.5, minor=True)
-    pyplot.grid(which='minor', alpha=.2)
-    for line in pyplot.gca().yaxis.get_ticklines() + pyplot.gca().xaxis.get_ticklines() + pyplot.gca().xaxis.get_ticklines(minor=True) + pyplot.gca().yaxis.get_ticklines(minor=True):
-    # label is a Text instance
-        line.set_markersize(0)
-    pyplot.ylabel('Hidden State')
-    pyplot.title("Broad paper Emission probabilities")
-    #b = pyplot.colorbar(shrink=.7)
-    #b.set_label("Probability")
-    pyplot.subplots_adjust(right=.7)
-    outfile = (args.out_params + '_broadpaper.png').format(param='emission', **args.__dict__)
-    pyplot.savefig(os.path.join(args.out_dir, outfile), dpi=240)
+    if args.continuous_observations:
+        # plot mean values
+        matplotlib.rcParams['font.size'] = 8
+        pyplot.figure(figsize=(max(1,round(L/3.)),max(1, round(K/3.))))
+        print (max(1,round(L/3.)),max(1, round(K/3.)))
+        pyplot.imshow(args.means.astype(sp.float64), interpolation='nearest', aspect='auto',
+                      vmin=0, vmax=args.means.max(), cmap='OrRd', origin='lower')
+        for k in range(K):
+            for l in range(L):
+                pyplot.text(l, k, '%.1f' % (args.means[k,l]), horizontalalignment='center', verticalalignment='center', fontsize=5)
+        pyplot.yticks(sp.arange(K), sp.arange(K)+1)
+        pyplot.gca().set_yticks(sp.arange(K)+.5, minor=True)
+        pyplot.xticks(sp.arange(L), valid_marks, rotation=30, horizontalalignment='right')
+        pyplot.gca().set_xticks(sp.arange(L)+.5, minor=True)
+        pyplot.grid(which='minor', alpha=.2)
+        for line in pyplot.gca().yaxis.get_ticklines() + pyplot.gca().xaxis.get_ticklines() + pyplot.gca().xaxis.get_ticklines(minor=True) + pyplot.gca().yaxis.get_ticklines(minor=True):
+        # label is a Text instance
+            line.set_markersize(0)
+        pyplot.ylabel('Hidden State')
+        pyplot.title("Emission Mean")
+        #b = pyplot.colorbar(shrink=.7)
+        #b.set_label("Probability")
+        outfile = (args.out_params + '_it{iteration}.png').format(param='emission_means', **args.__dict__)
+        pyplot.savefig(os.path.join(args.out_dir, outfile), dpi=240)
+
+        # plot variances
+        pyplot.figure(figsize=(max(1,round(L/3.)),max(1, round(K/3.))))
+        print (L/3,K/3.)
+        pyplot.imshow(args.variances.astype(sp.float64), interpolation='nearest', aspect='auto',
+                      vmin=0, vmax=args.variances.max(), cmap='OrRd', origin='lower')
+        for k in range(K):
+            for l in range(L):
+                pyplot.text(l, k, '%.1f' % (args.variances[k,l]), horizontalalignment='center', verticalalignment='center', fontsize=5)
+        pyplot.yticks(sp.arange(K), sp.arange(K)+1)
+        pyplot.gca().set_yticks(sp.arange(K)+.5, minor=True)
+        pyplot.xticks(sp.arange(L), valid_marks, rotation=30, horizontalalignment='right')
+        pyplot.gca().set_xticks(sp.arange(L)+.5, minor=True)
+        pyplot.grid(which='minor', alpha=.2)
+        for line in pyplot.gca().yaxis.get_ticklines() + pyplot.gca().xaxis.get_ticklines() + pyplot.gca().xaxis.get_ticklines(minor=True) + pyplot.gca().yaxis.get_ticklines(minor=True):
+        # label is a Text instance
+            line.set_markersize(0)
+        pyplot.ylabel('Hidden State')
+        pyplot.title("Emission Variance")
+        #b = pyplot.colorbar(shrink=.7)
+        #b.set_label("Probability")
+        outfile = (args.out_params + '_it{iteration}.png').format(param='emission_variances', **args.__dict__)
+        pyplot.savefig(os.path.join(args.out_dir, outfile), dpi=240)
+    else:
+        matplotlib.rcParams['font.size'] = 8
+        pyplot.figure(figsize=(max(1,round(L/3.)),max(1, round(K/3.))))
+        print (L/3,K/3.)
+        pyplot.imshow(args.emit_probs.astype(sp.float64), interpolation='nearest', aspect='auto',
+                      vmin=0, vmax=1, cmap='OrRd', origin='lower')
+        for k in range(K):
+            for l in range(L):
+                pyplot.text(l, k, '%2.0f' % (args.emit_probs[k,l] * 100), horizontalalignment='center', verticalalignment='center')
+        pyplot.yticks(sp.arange(K), sp.arange(K)+1)
+        pyplot.gca().set_yticks(sp.arange(K)+.5, minor=True)
+        pyplot.xticks(sp.arange(L), valid_marks, rotation=30, horizontalalignment='right')
+        pyplot.gca().set_xticks(sp.arange(L)+.5, minor=True)
+        pyplot.grid(which='minor', alpha=.2)
+        for line in pyplot.gca().yaxis.get_ticklines() + pyplot.gca().xaxis.get_ticklines() + pyplot.gca().xaxis.get_ticklines(minor=True) + pyplot.gca().yaxis.get_ticklines(minor=True):
+        # label is a Text instance
+            line.set_markersize(0)
+        pyplot.ylabel('Hidden State')
+        pyplot.title("Emission probabilities")
+        #b = pyplot.colorbar(shrink=.7)
+        #b.set_label("Probability")
+        outfile = (args.out_params + '_it{iteration}.png').format(param='emission', **args.__dict__)
+        pyplot.savefig(os.path.join(args.out_dir, outfile), dpi=240)
+
+
+    #broad_paper_enrichment = sp.array([[16,2,2,6,17,93,99,96,98,2],
+    #                               [12,2,6,9,53,94,95,14,44,1],
+    #                               [13,72,0,9,48,78,49,1,10,1],
+    #                               [11,1,15,11,96,99,75,97,86,4],
+    #                               [5,0,10,3,88,57,5,84,25,1],
+    #                               [7,1,1,3,58,75,8,6,5,1],
+    #                               [2,1,2,1,56,3,0,6,2,1],
+    #                               [92,2,1,3,6,3,0,0,1,1],
+    #                               [5,0,43,43,37,11,2,9,4,1],
+    #                               [1,0,47,3,0,0,0,0,0,1],
+    #                               [0,0,3,2,0,0,0,0,0,0],
+    #                               [1,27,0,2,0,0,0,0,0,0],
+    #                               [0,0,0,0,0,0,0,0,0,0],
+    #                               [22,28,19,41,6,5,26,5,13,37],
+    #                               [85,85,91,88,76,77,91,73,85,78],
+    #                               [float('nan'), float('nan'),float('nan'),float('nan'),float('nan'),float('nan'),float('nan'),float('nan'),float('nan'),float('nan')]
+    #                            ]) / 100.
+    #mapping_from_broad = dict(zip(range(K), (5,2,0,14,4,6,9,1,12,-1,3,12,8,7,10,12,11,13)))
+    #broad_paper_enrichment = broad_paper_enrichment[tuple(mapping_from_broad[i] for i in range(K)), :]
+    #broad_names = ['Active promoter', 'Weak promoter', 'Inactive/poised promoter', 'Strong enhancer',
+    #               'Strong enhancer', 'weak/poised enhancer', 'Weak/poised enhancer', 'Insulator',
+    #               'Transcriptional transition', 'Transcriptional elongation', 'Weak transcribed',
+    #               'Polycomb repressed', 'Heterochrom; low signal', 'Repetitive/CNV', 'Repetitive/CNV',
+    #               'NA', 'NA', 'NA']
+    #pyplot.figure(figsize=(L/3,K/3.))
+    #print (L/3,K/3.)
+    #pyplot.imshow(broad_paper_enrichment, interpolation='nearest', aspect='auto',
+    #              vmin=0, vmax=1, cmap='OrRd', origin='lower')
+    #for k in range(K):
+    #    for l in range(L):
+    #        pyplot.text(l, k, '%2.0f' % (broad_paper_enrichment[k,l] * 100), horizontalalignment='center', verticalalignment='center')
+    #    pyplot.text(L, k, broad_names[mapping_from_broad[k]], horizontalalignment='left', verticalalignment='center', fontsize=6)
+    #pyplot.yticks(sp.arange(K), sp.arange(K)+1)
+    #pyplot.gca().set_yticks(sp.arange(K)+.5, minor=True)
+    #pyplot.xticks(sp.arange(L), valid_marks, rotation=30, horizontalalignment='right')
+    #pyplot.gca().set_xticks(sp.arange(L)+.5, minor=True)
+    #pyplot.grid(which='minor', alpha=.2)
+    #for line in pyplot.gca().yaxis.get_ticklines() + pyplot.gca().xaxis.get_ticklines() + pyplot.gca().xaxis.get_ticklines(minor=True) + pyplot.gca().yaxis.get_ticklines(minor=True):
+    ## label is a Text instance
+    #    line.set_markersize(0)
+    #pyplot.ylabel('Hidden State')
+    #pyplot.title("Broad paper Emission probabilities")
+    ##b = pyplot.colorbar(shrink=.7)
+    ##b.set_label("Probability")
+    #pyplot.subplots_adjust(right=.7)
+    #outfile = (args.out_params + '_broadpaper.png').format(param='emission', **args.__dict__)
+    #pyplot.savefig(os.path.join(args.out_dir, outfile), dpi=240)
 
     pyplot.close('all')
     sp.seterr(**old_err)
@@ -886,7 +968,7 @@ def make_tree(args):
     # {inf:0, 0:[1,2], 1:[children(1)], ...}
     global vert_children
     vert_children = dict((pa, []) for pa in
-                            tree_by_parents.keys() + tree_by_parents.values())
+                            tree_by_parents.keys())# + tree_by_parents.values())
     for pa in tree_by_parents.values():
         for ch in tree_by_parents.keys():
             if tree_by_parents[ch] == pa:
@@ -899,6 +981,14 @@ def make_tree(args):
         vert_children[pa] = sp.array(vert_children[pa], dtype=sp.int32)
     args.vert_children = vert_children
 
+#    vert_children = sp.ones(I,  dtype = 'object')
+#    for pa in range(I):
+#        vert_children[pa] = []
+#        for child, parent in tree_by_parents.items():
+#            if pa == parent:
+#                vert_children[pa].append(child)
+#    print vert_children
+#    args.vert_children = vert_children
 def random_params(K, L):
     """Create and normalize random parameters for Mean-Field inference"""
     #sp.random.seed([5])
@@ -973,6 +1063,357 @@ def split_data(args):
 
     
         
+def extract_local_features(args):
+    """extract some local features from the given data, saving an X array with extra dimensions"""
+    sizes = []
+    total_size = 0
+    covered_size = 0
+    start_positions = {}
+    for f in args.observe_matrix:
+        print '# features on ', f
+        X = sp.load(f).astype(sp.int8)
+        total_size += X.shape[1]
+        #start_ts = xrange(0, X.shape[1], args.chunksize)
+        #end_ts = xrange(args.chunksize, X.shape[1] + args.chunksize, args.chunksize)
+
+        density = X.sum(axis=0).sum(axis=1)  # summation over I, then L
+        #from ipdb import set_trace; set_trace()
+        gk = _gauss_kernel(args.window_size)
+        smoothed_density = scipy.signal.convolve(density, gk, mode='same')
+        regions_to_keep = smoothed_density >= args.min_reads
+
+        # find the regions where a transition is made from no reads to reads, and reads to no reads
+        start_ts = sp.where(sp.diff(regions_to_keep.astype(sp.int8)) > 0)[0]
+        end_ts = sp.where(sp.diff(regions_to_keep.astype(sp.int8)) < 0)[0]
+
+        cur_regions = [r for r in zip(start_ts, end_ts) if r[1] - r[0] >= args.min_size]
+        sizes.extend([end_t - start_t for start_t, end_t in cur_regions])
+
+        print 'saving %s regions' % len(sizes)
+        for chunknum, (start_t, end_t) in enumerate(cur_regions):
+            covered_size += end_t - start_t
+            tmpX = X[:, start_t:end_t, :]
+            name = os.path.splitext(f)[0] + '.chunk%s.npy' % chunknum
+            sp.save(name, tmpX)
+            start_positions[name] = start_t
+    print '# plotting size distribution'
+    pyplot.figure()
+    pyplot.figtext(.5,.01,'%s regions; %s bins total; %s bins covered; coverage = %.3f' % (len(sizes),total_size, covered_size, covered_size / float(total_size)), ha='center')
+    pyplot.hist(sizes, bins=100)
+    pyplot.title('chunk sizes for all chroms, min_reads %s, min_size %s, window_size %s' % (args.min_reads, args.min_size, args.window_size))
+    pyplot.savefig('chunk_sizes.minreads%s.minsize%s.windowsize%s.png' % (args.min_reads, args.min_size, args.window_size))
+
+    pickle.dump(start_positions, open('start_positions.pkl', 'w'))
+    # --min_reads .5 --min_size 25 --window_size 200;
+
+
+
+def convert_data_continuous_features_and_split(args):
+    """histogram both treatment and control data as specified by args
+    This saves the complete X matrix
+
+    This version doesn't binarize the data, smooths out the read signal (gaussian convolution)
+    and adds derivative information
+    """
+    if args.download_first:
+        download_data(args)
+    I = len(args.species)
+    L = len(args.marks)
+    final_data = None
+    total_size = 0
+    covered_size = 0
+    start_positions = {}
+    # make sure all the data is present...
+    for species in args.species:
+        for mark in args.marks:
+            d_files = [f for f in glob.glob(args.bam_template.format(
+                                                species=species, mark=mark))]
+            if len(d_files) == 0:
+                print("No histone data for species %s mark %s Expected: %s" %
+                              (species, mark, args.bam_template.format(
+                                                species=species, mark=mark)))
+
+    for i, species in enumerate(args.species):
+        for l, mark in enumerate(args.marks):
+            d_obs = []
+            d_files = [f for f in glob.glob(args.bam_template.format(
+                                                species=species, mark=mark))]
+            if len(d_files) == 0:
+                args.mark_avail[i, l] = 0
+            else:
+                args.mark_avail[i, l] = 1
+                for mark_file in d_files:
+                    try:
+                        d_obs.append(histogram_reads(mark_file, args.windowsize,
+                                                    args.chromosomes))
+                    except ValueError as e:
+                        print e.message
+                    print d_obs[-1].sum()
+                    print d_obs[-1].shape
+                d_obs = reduce(operator.add, d_obs)  # add all replicants together
+                #print 'before per million:', d_obs.sum()
+                #d_obs /= (d_obs.sum() / 1e7)  # convert to reads mapping per ten million
+                # convert to a binary array with global poisson
+                #genome_rate = d_obs / (d_obs.sum() / 1e6)
+
+                if final_data is None:
+                    final_data = sp.zeros((I, len(d_obs), L), dtype=sp.float32)
+                final_data[i, :, l] = d_obs
+                total_size = final_data.shape[1]
+
+
+    regions_to_keep = (final_data[:, :, tuple(range(L))].sum(axis=0).sum(axis=1) >= args.min_reads).astype(sp.int8)
+    # find the regions where a transition is made from no reads to reads, and reads to no reads
+    start_ts = sp.where(sp.diff(regions_to_keep) > 0)[0]
+    end_ts = sp.where(sp.diff(regions_to_keep) < 0)[0]
+
+    cur_regions = [r for r in zip(start_ts, end_ts) if r[1] - r[0] >= args.min_size]
+    sizes = [end_t - start_t for start_t, end_t in cur_regions]
+
+    print 'saving %s regions' % len(sizes)
+    tarout = tarfile.open(args.outfile + '.tar.gz', 'w:gz')
+    for chunknum, (start_t, end_t) in enumerate(cur_regions):
+        covered_size += end_t - start_t
+        tmpX = final_data[:, start_t:end_t, :]
+
+        print 'adding chunk', chunknum, 'of', len(cur_regions)
+        s = StringIO()
+        sp.save(s, tmpX)
+        name = args.outfile + '.chunk%s.npy' % chunknum
+        info = tarfile.TarInfo(name)
+        info.size = s.tell(); info.mtime = time.time()
+        s.seek(0)
+        tarout.addfile(info, s)
+        start_positions[name] = start_t
+
+    print '# plotting size distribution'
+    pyplot.figure()
+    pyplot.figtext(.5,.01,'%s regions; %s bins total; %s bins covered; coverage = %.3f' % (len(sizes),total_size, covered_size, covered_size / float(total_size)), ha='center')
+    pyplot.hist(sizes, bins=100)
+    pyplot.title('chunk sizes for all chroms, min_reads %s, min_size %s, windowsize %s' % (args.min_reads, args.min_size, args.windowsize))
+    pyplot.savefig('chunk_sizes.minreads%s.minsize%s.windowsize%s.png' % (args.min_reads, args.min_size, args.windowsize))
+
+    s = StringIO()
+    pyplot.savefig(s)
+    info = tarfile.TarInfo('chunk_sizes.minreads%s.minsize%s.windowsize%s.png' % (args.min_reads, args.min_size, args.windowsize))
+    info.size = s.tell(); info.mtime = time.time()
+    s.seek(0)
+    tarout.addfile(info, s)
+
+    s = StringIO()
+    pickle.dump(start_positions, s)
+    info = tarfile.TarInfo('start_positions.pkl')
+    info.size = s.tell(); info.mtime = time.time()
+    s.seek(0)
+    tarout.addfile(info, s)
+    pickle.dump(start_positions, open('start_positions.pkl', 'w'))
+    # --min_reads .5 --min_size 25 --window_size 200;
+
+
+    s = StringIO()
+    sp.save(s, args.mark_avail)
+    info = tarfile.TarInfo('available_marks.npy')
+    info.size = s.tell(); info.mtime = time.time()
+    s.seek(0)
+    tarout.addfile(info, s)
+    pickle.dump(start_positions, open('start_positions.pkl', 'w'))
+    # --min_reads .5 --min_size 25 --window_size 200;
+
+    tarout.close()
+
+
+    print "output file:", args.outfile
+    print 'available marks:', args.mark_avail
+    #with open(args.outfile, 'wb') as outfile:
+    #    sp.save(outfile, final_data)
+    with open(args.outfile + '.available_marks', 'wb') as outfile:
+        sp.save(outfile, args.mark_avail)
+
+
+
+
+def convert_data_continuous_features_and_split_old(args):
+    """histogram both treatment and control data as specified by args
+    This saves the complete X matrix
+
+    This version doesn't binarize the data, smooths out the read signal (gaussian convolution)
+    and adds derivative information
+    """
+    if args.download_first:
+        download_data(args)
+    I = len(args.species)
+    L = len(args.marks)
+    final_data = None
+    total_size = 0
+    covered_size = 0
+    start_positions = {}
+    # make sure all the data is present...
+    for species in args.species:
+        for mark in args.marks:
+            d_files = [f for f in glob.glob(args.bam_template.format(
+                                                species=species, mark=mark))]
+            if len(d_files) == 0:
+                print("No histone data for species %s mark %s Expected: %s" %
+                              (species, mark, args.bam_template.format(
+                                                species=species, mark=mark)))
+
+    for i, species in enumerate(args.species):
+        for l, mark in enumerate(args.marks):
+            l = l * 3
+            d_obs = []
+            d_files = [f for f in glob.glob(args.bam_template.format(
+                                                species=species, mark=mark))]
+            if len(d_files) == 0:
+                args.mark_avail[i, l] = 0
+                args.mark_avail[i, l+1] = 0
+                args.mark_avail[i, l+2] = 0
+            else:
+                args.mark_avail[i, l] = 1
+                args.mark_avail[i, l+1] = 1
+                args.mark_avail[i, l+2] = 1
+                for mark_file in d_files:
+                    try:
+                        d_obs.append(histogram_reads(mark_file, args.windowsize,
+                                                    args.chromosomes))
+                    except ValueError as e:
+                        print e.message
+                    print d_obs[-1].sum()
+                    print d_obs[-1].shape
+                d_obs = reduce(operator.add, d_obs)  # add all replicants together
+                #print 'before per million:', d_obs.sum()
+                #d_obs /= (d_obs.sum() / 1e7)  # convert to reads mapping per ten million
+                # convert to a binary array with global poisson
+                genome_rate = d_obs / (d_obs.sum() / 1e6)
+
+                if final_data is None:
+                    final_data = sp.zeros((I, len(d_obs), L * 3), dtype=sp.float32)
+                asinh_obs = sp.log(genome_rate + sp.sqrt(genome_rate * genome_rate + 1))
+                gk = _gauss_kernel(3)
+                smoothed_obs = scipy.signal.convolve(asinh_obs, gk, mode='same')
+                smooth_deriv = sp.gradient(smoothed_obs)
+                smooth_deriv2 = sp.gradient(smooth_deriv)
+                final_data[i, :, l] = smoothed_obs
+                final_data[i, :, l + 1] = smooth_deriv
+                final_data[i, :, l + 2] = smooth_deriv2
+                total_size = final_data.shape[1]
+
+
+    regions_to_keep = (final_data[:, :, tuple(range(0, L * 3, 3))].sum(axis=0).sum(axis=1) >= args.min_reads).astype(sp.int8)
+    # find the regions where a transition is made from no reads to reads, and reads to no reads
+    start_ts = sp.where(sp.diff(regions_to_keep) > 0)[0]
+    end_ts = sp.where(sp.diff(regions_to_keep) < 0)[0]
+
+    cur_regions = [r for r in zip(start_ts, end_ts) if r[1] - r[0] >= args.min_size]
+    sizes = [end_t - start_t for start_t, end_t in cur_regions]
+
+    print 'saving %s regions' % len(sizes)
+    tarout = tarfile.open(args.outfile + '.tar.gz', 'w:gz')
+    for chunknum, (start_t, end_t) in enumerate(cur_regions):
+        covered_size += end_t - start_t
+        tmpX = final_data[:, start_t:end_t, :]
+
+        print 'adding chunk', chunknum, 'of', len(cur_regions)
+        s = StringIO()
+        sp.save(s, tmpX)
+        name = args.outfile + '.chunk%s.npy' % chunknum
+        info = tarfile.TarInfo(name)
+        info.size = s.tell(); info.mtime = time.time()
+        s.seek(0)
+        tarout.addfile(info, s)
+        start_positions[name] = start_t
+
+    print '# plotting size distribution'
+    pyplot.figure()
+    pyplot.figtext(.5,.01,'%s regions; %s bins total; %s bins covered; coverage = %.3f' % (len(sizes),total_size, covered_size, covered_size / float(total_size)), ha='center')
+    pyplot.hist(sizes, bins=100)
+    pyplot.title('chunk sizes for all chroms, min_reads %s, min_size %s, windowsize %s' % (args.min_reads, args.min_size, args.windowsize))
+    pyplot.savefig('chunk_sizes.minreads%s.minsize%s.windowsize%s.png' % (args.min_reads, args.min_size, args.windowsize))
+
+    s = StringIO()
+    pyplot.savefig(s)
+    info = tarfile.TarInfo('chunk_sizes.minreads%s.minsize%s.windowsize%s.png' % (args.min_reads, args.min_size, args.windowsize))
+    info.size = s.tell(); info.mtime = time.time()
+    s.seek(0)
+    tarout.addfile(info, s)
+
+    s = StringIO()
+    pickle.dump(start_positions, s)
+    info = tarfile.TarInfo('start_positions.pkl')
+    info.size = s.tell(); info.mtime = time.time()
+    s.seek(0)
+    tarout.addfile(info, s)
+    pickle.dump(start_positions, open('start_positions.pkl', 'w'))
+    # --min_reads .5 --min_size 25 --window_size 200;
+
+
+    s = StringIO()
+    sp.save(s, args.mark_avail)
+    info = tarfile.TarInfo('available_marks.npy')
+    info.size = s.tell(); info.mtime = time.time()
+    s.seek(0)
+    tarout.addfile(info, s)
+    pickle.dump(start_positions, open('start_positions.pkl', 'w'))
+    # --min_reads .5 --min_size 25 --window_size 200;
+
+    tarout.close()
+
+
+    print "output file:", args.outfile
+    print 'available marks:', args.mark_avail
+    #with open(args.outfile, 'wb') as outfile:
+    #    sp.save(outfile, final_data)
+    with open(args.outfile + '.available_marks', 'wb') as outfile:
+        sp.save(outfile, args.mark_avail)
+
+
+
+def split_data(args):
+    """Split the given observation matrices into smaller chunks"""
+    sizes = []
+    total_size = 0
+    covered_size = 0
+    start_positions = {}
+    for f in args.observe_matrix:
+        print '# splitting ', f
+        X = sp.load(f).astype(sp.int8)
+        total_size += X.shape[1]
+        #start_ts = xrange(0, X.shape[1], args.chunksize)
+        #end_ts = xrange(args.chunksize, X.shape[1] + args.chunksize, args.chunksize)
+
+        density = X.sum(axis=0).sum(axis=1)  # sumation over I, then L
+        #from ipdb import set_trace; set_trace()
+        gk = _gauss_kernel(args.window_size)
+        smoothed_density = scipy.signal.convolve(density, gk, mode='same')
+        regions_to_keep = smoothed_density >= args.min_reads
+
+        # find the regions where a transition is made from no reads to reads, and reads to no reads
+        start_ts = sp.where(sp.diff(regions_to_keep.astype(sp.int8)) > 0)[0]
+        end_ts = sp.where(sp.diff(regions_to_keep.astype(sp.int8)) < 0)[0]
+
+        cur_regions = [r for r in zip(start_ts, end_ts) if r[1] - r[0] >= args.min_size]
+        sizes.extend([end_t - start_t for start_t, end_t in cur_regions])
+
+        print 'saving %s regions' % len(sizes)
+        for chunknum, (start_t, end_t) in enumerate(cur_regions):
+            covered_size += end_t - start_t
+            tmpX = X[:, start_t:end_t, :]
+            name = os.path.splitext(f)[0] + '.chunk%s.npy' % chunknum
+            sp.save(name, tmpX)
+            start_positions[name] = start_t
+    print '# plotting size distribution'
+    pyplot.figure()
+    pyplot.figtext(.5,.01,'%s regions; %s bins total; %s bins covered; coverage = %.3f' % (len(sizes),total_size, covered_size, covered_size / float(total_size)), ha='center')
+    pyplot.hist(sizes, bins=100)
+    pyplot.title('chunk sizes for all chroms, min_reads %s, min_size %s, window_size %s' % (args.min_reads, args.min_size, args.window_size))
+    pyplot.savefig('chunk_sizes.minreads%s.minsize%s.windowsize%s.png' % (args.min_reads, args.min_size, args.window_size))
+
+    pickle.dump(start_positions, open('start_positions.pkl', 'w'))
+    # --min_reads .5 --min_size 25 --window_size 200;
+
+
+
+
+
 
 def _gauss_kernel(winsize):
     x = sp.mgrid[-int(winsize):int(winsize)+1]
@@ -994,29 +1435,36 @@ def convert_data(args):
             d_files = [f for f in glob.glob(args.bam_template.format(
                                                 species=species, mark=mark))]
             if len(d_files) == 0:
-                raise IOError("No histone data for species %s mark %s Expected: %s" %
+                print("No histone data for species %s mark %s Expected: %s" %
                               (species, mark, args.bam_template.format(
                                                 species=species, mark=mark)))
+
     for i, species in enumerate(args.species):
         for l, mark in enumerate(args.marks):
+
             d_obs = []
             d_files = [f for f in glob.glob(args.bam_template.format(
                                                 species=species, mark=mark))]
-            for mark_file in d_files:
-                d_obs.append(histogram_reads(mark_file, args.windowsize,
-                                             args.chromosomes))
-                print d_obs[-1].sum()
-            d_obs = reduce(operator.add, d_obs)  # add all replicants together
-            #print 'before per million:', d_obs.sum()
-            #d_obs /= (d_obs.sum() / 1e7)  # convert to reads mapping per ten million
-            # convert to a binary array with global poisson
-            genome_rate = d_obs.sum() / float(len(d_obs))
-            print 'after per million', len(d_obs), d_obs.sum(), genome_rate
-            d_obs = call_significant_sites(d_obs, genome_rate, args.max_pvalue)
-            if final_data is None:
-                final_data = sp.zeros((I, len(d_obs), L), dtype=sp.int8)
-            print 'bg_rate', genome_rate, 'total_above', d_obs.sum()
-            final_data[i, :, l] = d_obs
+            if len(d_files) == 0:
+                pass
+            else:
+                for mark_file in d_files:
+                    d_obs.append(histogram_reads(mark_file, args.windowsize,
+                                                 args.chromosomes))
+                    print d_obs[-1].sum()
+                    print d_obs[-1].shape
+                d_obs = reduce(operator.add, d_obs)  # add all replicants together
+                #print 'before per million:', d_obs.sum()
+                #d_obs /= (d_obs.sum() / 1e7)  # convert to reads mapping per ten million
+                # convert to a binary array with global poisson
+                genome_rate = d_obs.sum() / float(len(d_obs))
+                print 'after per million', len(d_obs), d_obs.sum(), genome_rate
+                d_obs = call_significant_sites(d_obs, genome_rate, args.max_pvalue)
+                if final_data is None:
+                    final_data = sp.zeros((I, len(d_obs), L), dtype=sp.int8)
+                print 'bg_rate', genome_rate, 'total_above', d_obs.sum()
+                final_data[i, :, l] = d_obs
+    print "output file:", args.outfile
     with open(args.outfile, 'wb') as outfile:
         sp.save(outfile, final_data)
 
@@ -1070,8 +1518,12 @@ def histogram_reads(bam_file, windowsize, chromosomes='all'):
     if chromosomes == 'all':
         chromosomes = filter(lambda c: c not in ['chrM', 'chrY', 'chrX'],
                              reads_bam.references)
+        actual_chromosomes = list(set(chromosomes)) # uniquefy the chroms
         chrom_lengths = [reads_bam.lengths[reads_bam.references.index(c)]
                                        for c in chromosomes]
+        if len(actual_chromosomes) != len(chromosomes):
+            print 'SANITY CHECK... removing the first half of the chromosome bin for %s' % bam_file
+            chrom_lengths = chrom_lengths[len(chrom_lengths)/2:]
     else:
         chromosomes = filter(lambda c: c not in ['chrM', 'chrY', 'chrX'],
                              chromosomes)
