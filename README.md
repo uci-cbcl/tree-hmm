@@ -40,7 +40,7 @@ product-of-chains approximation on a large set of files, iterating until
 the change in free energy is < 1e-5 in either the E-step or the M-step and 
 running in parallel locally rather than on a grid:
 
-    python ~/Dropbox/histone_var_bayes/code/histone_vb_cython3.py infer 18 \
+    python ~/Dropbox/histone_var_bayes/code/histone_tree_hmm.py infer 18 \
         --max_iter 1 --max_E_iter 50 --approx poc --epsilon 1e-5 \
         --epsilon_e 1e-5 --run_local \
         "/data/encode_histone/chr*_all.i*.chunk*.npy"

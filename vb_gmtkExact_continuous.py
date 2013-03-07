@@ -102,13 +102,13 @@ def workspace_to_npy_args(filename):
 
 
 def plot_params(wkspacefile):
-    import histone_vb_cython3
+    import histone_tree_hmm
     args = workspace_to_npy_args(wkspacefile)
     try:
         os.mkdir(args.out_dir)
     except:
         pass
-    histone_vb_cython3.plot_params(args)
+    histone_tree_hmm.plot_params(args)
 
 
 def get_npy_params_as_args(observe, path='.', approx='clique', template='{path}/{approx}_{param}_{observe}'):
@@ -384,8 +384,8 @@ def parse_viterbi_states_to_Q(args, gmtk_obs):
 
 
 def run_gmtk_lineagehmm(args):
-    #import histone_vb_cython3_gmtk as histone_vb_cython3
-    import histone_vb_cython3
+    #import histone_tree_hmm_gmtk as histone_tree_hmm
+    import histone_tree_hmm
     try:
         os.mkdir('gmtk_images')
     except:
@@ -397,7 +397,7 @@ def run_gmtk_lineagehmm(args):
     args.out_params = 'gmtk_images/gmtk_{param}_{observe}'
     args.out_dir = '.'
     args.free_energy = []
-    histone_vb_cython3.plot_params(args)
+    histone_tree_hmm.plot_params(args)
     # convert .npy parameters and data into gmtk format
     args.observe_txt = []
     for f in args.observe_matrix:
@@ -483,8 +483,8 @@ DT_IN_FILE inline 1
         # run one final accumulator to get params
         accumulate_em_runs(args, gmtk_obs, gmtk_master)
 
-        histone_vb_cython3.plot_params(args)
-        histone_vb_cython3.plot_energy(args)
+        histone_tree_hmm.plot_params(args)
+        histone_tree_hmm.plot_energy(args)
 
         #check convergence
         f = args.free_energy[-1]

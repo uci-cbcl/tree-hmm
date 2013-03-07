@@ -86,7 +86,6 @@ def prodc_initialize_qs(theta, alpha, beta, gamma, X, log_obs_mat):
             tmp2 = np.dot(np.dot(diag(a_s[t-1,:]), transmat), diag(emit_probs_mat[:,t]* b_s[t,:]))
             Q_pairs[i, t, :, :]  = tmp2/tmp2.sum()
 
-    print 'done'
     return Q, Q_pairs
 
 def prodc_update_q(args):
@@ -173,7 +172,6 @@ def prodc_update_qs_i_new(int si, np.ndarray[float_type, ndim=3] theta,
     prev_b_t = np.ones(K, dtype=np.longdouble)
     prev_a_t = np.zeros(K, dtype=np.longdouble)
 
-    print 'starting fw-bw algorithm',
 
     vp = vert_parent[si]
     # update transition along nodes
@@ -184,11 +182,13 @@ def prodc_update_qs_i_new(int si, np.ndarray[float_type, ndim=3] theta,
         for v in xrange(K):
             g_t[v] = 0.
         for k in xrange(K):
+            #evidence term from marginalization of children
             q_sum_k_ch_i = 0.
             for ch_i in vert_children[si]:
                 for v in xrange(K):
                     for h in xrange(K):
                         q_sum_k_ch_i += Q_pairs[ch_i, t, h, v] * log_theta[k, h, v]
+            # all together
             for v in xrange(K):
                 if si == 0:
                     log_f[v,k] = log_alpha[v,k] + log_g_t[k] + q_sum_k_ch_i
@@ -241,10 +241,10 @@ def prodc_update_qs_i_new(int si, np.ndarray[float_type, ndim=3] theta,
     #print 'here3'
     for k in xrange(K):
         f1[k] /= total_f1
-    
+
     #print 'f1', f1
     #print 'transmat', transmat
-    
+
     # update Q, Q_pairs, lh
     for k in xrange(K):
         a_t[k] = f1[k] * emit_probs_mat[k,0]
@@ -268,17 +268,17 @@ def prodc_update_qs_i_new(int si, np.ndarray[float_type, ndim=3] theta,
     #        a_t[k] /= s_t[t]
     #        a_s[t,k] = a_t[k]
     for t in xrange(1,T):
-#        breakpoint()        *#*#*#*#     
+#        breakpoint()        *#*#*#*#
         a_t = emit_probs_mat[:, t] * (np.dot(a_t.T, transmat[t,:,:]))
         s_t[t] = a_t.sum()
         a_t /= s_t[t]
         a_s[t,:] = a_t
-    
+
         #print t, a_s[t,:]
     #print 'forward done, waiting...'
     #time.sleep(3)
     #print a_s
-    
+
     #backward algorithm
     for t in xrange(T-2,-1,-1):
         #for k in xrange(K):
@@ -292,25 +292,25 @@ def prodc_update_qs_i_new(int si, np.ndarray[float_type, ndim=3] theta,
         for k in xrange(K):
             b_t[k] /= s_t[t+1]
             b_s[t,k] = b_t[k]
-    ##backward algorithm        
+    ##backward algorithm
     #for t in range(T-2,-1,-1):
     #    b_t = sp.dot(transmat[t+1,:,:], emit_probs_mat[:,t+1]*b_t)
     #    b_t /= s_t[t+1]
     #    b_s[t,:] = b_t
     #print 'b_s', b_s
-        
+
         #print t, b_t, s_t[t]
         #print b_s[t,:]
-    
+
     #global vb_prodc_s_t
     #vb_prodc_s_t = s_t
     #loglh[si] = np.log(s_t).sum()
     #print 'a_s', a_s
     #print 'b_s', b_s
     #print b_s
-    
+
     #print 'likelihood', loglh[si]
-    
+
     #tmp1 = a_s[0,:] * b_s[0,:]
     #Q[si,0,:] = tmp1/tmp1.sum()
     #for t in xrange(1,T):
@@ -329,9 +329,6 @@ def prodc_update_qs_i_new(int si, np.ndarray[float_type, ndim=3] theta,
     #    for k in xrange(K):
     #        for v in xrange(K):
     #            Q_pairs[si, t, k, v] /= tmpsum_qp
-
-    print 'almost done',
-
     tmp1 = a_s[0,:] * b_s[0,:]
     Q[si,0,:] = tmp1/tmp1.sum()
     for t in range(1,T):
@@ -351,10 +348,6 @@ def prodc_update_qs_i_new(int si, np.ndarray[float_type, ndim=3] theta,
 
 
 
-
-
-
-
 def prodc_update_params(args, renormalize=True):
     cdef:
         #np.ndarray[np.int8_t, ndim=3] X
@@ -370,6 +363,7 @@ def prodc_update_params(args, renormalize=True):
     Q, Q_pairs, theta, alpha, beta, gamma, vert_parent, vert_children, log_obs_mat, pseudocount = (args.Q, args.Q_pairs, args.theta,
                                                    args.alpha, args.beta,
                                                    args.gamma, args.vert_parent, args.vert_children, args.log_obs_mat, args.pseudocount)
+    mark_avail = args.mark_avail
     cdef int I = Q.shape[0], T = Q.shape[1], K = Q.shape[2]
     cdef int L = X.shape[2]
     cdef Py_ssize_t i,t,v,h,k,vp,l
@@ -385,8 +379,7 @@ def prodc_update_params(args, renormalize=True):
     alpha[:] = pseudocount
     beta[:] = pseudocount
     gamma[:] = pseudocount
-
-
+    emit_probs[:] = pseudocount
     for i in xrange(I):
     #for i in prange(I, nogil=True):
         vp = vert_parent[i]
@@ -404,8 +397,9 @@ def prodc_update_params(args, renormalize=True):
                             for h in xrange(K):
                                 theta[v,h,k] += Q[vp,t,v] * Q_pairs[i,t,h,k]
                 if not args.continuous_observations:
+                    real_i = args.real_species_i if args.real_species_i is not None else i
                     for l in xrange(L):
-                        if X[i,t,l]:
+                        if mark_avail[real_i,l] and X[i,t,l]:
                             emit_probs[k, l] += Q[i, t, k]
     #Q[:,:,:] = .0001
     #Q[:,:,0] = .9999
@@ -501,9 +495,9 @@ def prodc_free_energy(args):
     #        #if (q_cond - 1. > epsilon).any(): #abs(q_cond.sum(axis=1) -1.).any() > epsilon:
     #        #    breakpoint()
     #        #    print q_cond
-    #        
+    #
     #        total_free += (Q_pairs[i, t] * np.log(q_cond)).sum()
-    
+
     # calculate - Q* log(P)
     for i in xrange(I):
     #for i in prange(I, nogil=True):

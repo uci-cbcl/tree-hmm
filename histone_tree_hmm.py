@@ -88,7 +88,7 @@ sp.seterr(under='print')
 import vb_mf
 import vb_prodc
 #import loopy_bp
-import loopy_bp2 as loopy_bp
+import loopy_bp
 import clique_hmm
 #import concatenate_hmm
 import vb_gmtkExact_continuous as vb_gmtkExact
@@ -400,14 +400,14 @@ def do_inference(args):
                         if loopy_bp.bp_check_convergence(tmpargs):
                             break
                     print 'loopy convergence after %s iterations' % j
-                    e = loopy_bp.bp_bethe_free_energy(tmpargs)
-                    #e = loopy_bp.bp_mf_free_energy(tmpargs)
+                    #e = loopy_bp.bp_bethe_free_energy(tmpargs)
+                    e = loopy_bp.bp_mf_free_energy(tmpargs)
                     args.cmp_energy['loopy'].append(e)
                 if args.plot_iter != 0:
                     plot_energy_comparison(args)
 
     # save the final parameters and free energy to disk
-    print 'done iteratin'
+    print 'done iteration'
     if args.save_Q >= 1:
         for p in args.Q_to_save:
             sp.save(os.path.join(args.out_dir,
@@ -416,7 +416,7 @@ def do_inference(args):
     for p in args.params_to_save:
         sp.save(os.path.join(args.out_dir, args.out_params.format(param=p, **args.__dict__)),
                 args.__dict__[p])
-    
+
     #pickle.dump(args, os.path.join(args.out_dir, args.out_params.format(param='args', **args.__dict__)))
     print 'done savin'
     if not args.subtask and args.plot_iter != 0:
@@ -476,22 +476,19 @@ def init_args_for_inference(args):
         print '# loading previous params for warm start from %s' % args.warm_start
         tmpargs = copy.deepcopy(args)
         tmpargs.out_dir = args.warm_start
-        tmpargs.observe = 'all.npy'
+        #tmpargs.observe = 'all.npy'
         args.free_energy, args.theta, args.alpha, args.beta, args.gamma, args.emit_probs, args.emit_sum = load_params(tmpargs)
         try:
             args.free_energy = list(args.free_energy)
         except TypeError: # no previous free energy
             args.free_energy = []
         print 'done'
-        #import pdb; pdb.set_trace()
-	#args.iteration = -1
-	#plot_params(args)
     elif args.subtask:  # params in args already
         print '# using previous params from parallel driver'
     else:
         print '# generating random parameters'
         (args.theta, args.alpha, args.beta, args.gamma, args.emit_probs) = \
-                                                    random_params(args.K,args.L)
+                                                    random_params(args.I, args.K, args.L, args.separate_theta)
         if args.continuous_observations:
             del args.emit_probs
 
@@ -511,6 +508,10 @@ def init_args_for_inference(args):
         args.free_energy_func = vb_mf.mf_free_energy
         args.converged_func = vb_mf.mf_check_convergence
     elif args.approx == 'poc':  # product-of-chains approximation
+        if not args.separate_theta:
+            import vb_prodc
+        else:
+            import vb_prodc_sepTheta as vb_prodc
         args.log_obs_mat = sp.zeros((args.I,args.T,args.K), dtype=float_type)
         if args.continuous_observations:
             vb_mf.make_log_obs_matrix_gaussian(args)
@@ -556,6 +557,8 @@ def init_args_for_inference(args):
     elif args.approx == 'pot':  # product-of-trees approximation
         raise NotImplementedError("Product of Trees is not implemented yet!")
     elif args.approx == 'clique':
+        if args.separate_theta:
+           raise RuntimeError('separate_theta not implemented yet for clique')
         print 'making cliqued Q'
         args.Q = sp.zeros((args.I, args.T, args.K), dtype=float_type)
         clique_hmm.clique_init_args(args)
@@ -566,6 +569,8 @@ def init_args_for_inference(args):
     elif args.approx == 'concat':
         raise NotImplementedError("Concatenated HMM is not implemented yet!")
     elif args.approx == 'loopy':
+        if args.separate_theta:
+           raise RuntimeError('separate_theta not implemented yet for clique')
         if not args.subtask or args.iteration == 0:
             args.Q = vb_mf.mf_random_q(args.I, args.T, args.K)
         #else:
@@ -578,8 +583,8 @@ def init_args_for_inference(args):
 
         args.update_q_func = loopy_bp.bp_update_msg_new
         args.update_param_func = loopy_bp.bp_update_params_new
-        args.free_energy_func = loopy_bp.bp_bethe_free_energy
-        #args.free_energy_func = loopy_bp.bp_mf_free_energy
+        #args.free_energy_func = loopy_bp.bp_bethe_free_energy
+        args.free_energy_func = loopy_bp.bp_mf_free_energy
         args.converged_func = loopy_bp.bp_check_convergence
     elif args.approx == 'gmtk':
         pass
@@ -776,7 +781,11 @@ def load_params(args):
 
     #print 'loading from', os.path.join(args.out_dir, args.out_params.format(param='theta', **args.__dict__))
     theta = sp.load(os.path.join(args.out_dir, args.out_params.format(param='theta', **args.__dict__)))
-
+    if len(theta.shape)==3 and args.separate_theta:
+        tmp = sp.zeros((args.I-1, args.K, args.K, args.K), dtype=sp.longdouble)
+        for i in range(args.I-1):
+            tmp[i,:,:,:] = theta
+        theta = tmp
     #print 'loading from', os.path.join(args.out_dir, args.out_params.format(param='alpha', **args.__dict__))
     alpha = sp.load(os.path.join(args.out_dir, args.out_params.format(param='alpha', **args.__dict__)))
 
@@ -791,7 +800,7 @@ def load_params(args):
 
     #print 'loading from', os.path.join(args.out_dir, args.out_params.format(param='emit_sum', **args.__dict__))
     emit_sum = sp.load(os.path.join(args.out_dir, args.out_params.format(param='emit_sum', **args.__dict__)))
-    
+
     return free_energy, theta, alpha, beta, gamma, emit_probs, emit_sum
 
 def plot_energy_comparison(args):
@@ -838,6 +847,7 @@ def plot_energy(args):
         pyplot.ylabel('-Free Energy')
         pyplot.savefig(os.path.join(args.out_dir, (args.out_params + 'vs_previous.png').format(param='free_energy', **args.__dict__)))
         pyplot.close('all')
+
 def plot_Q(args):
     """Plot Q distribution"""
     outfile = (args.out_params + '_it{iteration}.png').format(param='Q', **args.__dict__)
@@ -934,6 +944,11 @@ def plot_params(args):
 
 
     # theta
+    if args.separate_theta:
+        theta_tmp = args.theta
+        for i in range((args.theta.shape)[0]):
+            setattr(args, 'theta_%s'%(i+1), args.theta[i,:,:,:])
+
     for theta_name in ['theta'] + ['theta_%s' % i for i in range(20)]:
         #print 'trying', theta_name
         if not hasattr(args, theta_name):
@@ -1191,10 +1206,14 @@ def make_tree(args):
 #                vert_children[pa].append(child)
 #    print vert_children
 #    args.vert_children = vert_children
-def random_params(K, L):
-    """Create and normalize random parameters for Mean-Field inference"""
+
+def random_params(I, K, L, separate_theta):
+    """Create and normalize random parameters for inference"""
     #sp.random.seed([5])
-    theta = sp.rand(K, K, K).astype(float_type)
+    if separate_theta:
+        theta = sp.rand(I-1, K, K, K).astype(float_type)
+    else:
+        theta = sp.rand(K, K, K).astype(float_type)
     alpha = sp.rand(K, K).astype(float_type)
     beta = sp.rand(K, K).astype(float_type)
     gamma = sp.rand(K).astype(float_type)
@@ -1232,20 +1251,20 @@ def split_data(args):
         total_size += X.shape[1]
         #start_ts = xrange(0, X.shape[1], args.chunksize)
         #end_ts = xrange(args.chunksize, X.shape[1] + args.chunksize, args.chunksize)
-        
+
         density = X.sum(axis=0).sum(axis=1)  # sumation over I, then L
         #from ipdb import set_trace; set_trace()
         gk = _gauss_kernel(args.window_size)
         smoothed_density = scipy.signal.convolve(density, gk, mode='same')
         regions_to_keep = smoothed_density >= args.min_reads
-        
+
         # find the regions where a transition is made from no reads to reads, and reads to no reads
         start_ts = sp.where(sp.diff(regions_to_keep.astype(sp.int8)) > 0)[0]
         end_ts = sp.where(sp.diff(regions_to_keep.astype(sp.int8)) < 0)[0]
-        
+
         cur_regions = [r for r in zip(start_ts, end_ts) if r[1] - r[0] >= args.min_size]
         sizes.extend([end_t - start_t for start_t, end_t in cur_regions])
-        
+
         print 'saving %s regions' % len(sizes)
         for chunknum, (start_t, end_t) in enumerate(cur_regions):
             covered_size += end_t - start_t
@@ -1259,12 +1278,12 @@ def split_data(args):
     pyplot.hist(sizes, bins=100)
     pyplot.title('chunk sizes for all chroms, min_reads %s, min_size %s, window_size %s' % (args.min_reads, args.min_size, args.window_size))
     pyplot.savefig('chunk_sizes.minreads%s.minsize%s.windowsize%s.png' % (args.min_reads, args.min_size, args.window_size))
-    
+
     pickle.dump(start_positions, open('start_positions.pkl', 'w'))
     # --min_reads .5 --min_size 25 --window_size 200;
 
-    
-        
+
+
 def extract_local_features(args):
     """extract some local features from the given data, saving an X array with extra dimensions"""
     sizes = []
@@ -1723,9 +1742,6 @@ def histogram_reads(bam_file, windowsize, chromosomes='all'):
         actual_chromosomes = list(set(chromosomes)) # uniquefy the chroms
         chrom_lengths = [reads_bam.lengths[reads_bam.references.index(c)]
                                        for c in chromosomes]
-        if len(actual_chromosomes) != len(chromosomes):
-            print 'SANITY CHECK... removing the first half of the chromosome bin for %s' % bam_file
-            chrom_lengths = chrom_lengths[len(chrom_lengths)/2:]
     else:
         chromosomes = filter(lambda c: c not in ['chrM', 'chrY', 'chrX'],
                              chromosomes)
