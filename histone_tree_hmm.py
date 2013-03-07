@@ -82,12 +82,16 @@ sp.seterr(under='print')
 
 import vb_mf
 import vb_prodc
-import loopy_bp
+#import loopy_bp
+import loopy_bp2 as loopy_bp
 import clique_hmm
 #import concatenate_hmm
+import vb_gmtkExact_continuous as vb_gmtkExact
+import vb_independent
 
 from do_parallel import do_parallel_inference
 
+float_type = sp.longdouble
 
 #try:
 #    from ipdb import set_trace as breakpoint
@@ -371,7 +375,7 @@ def init_args_for_inference(args):
         #    q_path = os.path.join(args.out_dir, args.out_params.format(param='Q', **args.__dict__))
         #    print 'loading previous Q from %s' % q_path
         #    args.Q = sp.load(q_path)
-        args.log_obs_mat = sp.zeros((args.I,args.T,args.K), dtype=sp.float64)
+        args.log_obs_mat = sp.zeros((args.I,args.T,args.K), dtype=float_type)
         vb_mf.make_log_obs_matrix(args)
 
         args.update_q_func = vb_mf.mf_update_q
@@ -379,8 +383,7 @@ def init_args_for_inference(args):
         args.free_energy_func = vb_mf.mf_free_energy
         args.converged_func = vb_mf.mf_check_convergence
     elif args.approx == 'poc':  # product-of-chains approximation
-        args.log_obs_mat = sp.zeros((args.I,args.T,args.K), dtype=sp.float64)
-        vb_mf.make_log_obs_matrix(args)
+        args.log_obs_mat = sp.zeros((args.I,args.T,args.K), dtype=float_type)
         if not args.subtask or args.iteration == 0:
             print '# generating Qs'
             args.Q, args.Q_pairs = vb_prodc.prodc_initialize_qs(args.theta, args.alpha, args.beta,
@@ -399,7 +402,7 @@ def init_args_for_inference(args):
         raise NotImplementedError("Product of Trees is not implemented yet!")
     elif args.approx == 'clique':
         print 'making cliqued Q'
-        args.Q = sp.zeros((args.I, args.T, args.K))
+        args.Q = sp.zeros((args.I, args.T, args.K), dtype=float_type)
         clique_hmm.clique_init_args(args)
         args.update_q_func = clique_hmm.clique_update_q
         args.update_param_func = clique_hmm.clique_update_params
@@ -414,8 +417,8 @@ def init_args_for_inference(args):
         #    q_path = os.path.join(args.out_dir, args.out_params.format(param='Q', **args.__dict__))
         #    print 'loading previous Q from %s' % q_path
         #    args.Q = sp.load(q_path)
-        args.lmds, args.pis = loopy_bp.bp_initialize_msg(args.I, args.T, args.K, args.vert_children)
-        args.log_obs_mat = sp.zeros((args.I,args.T,args.K), dtype=sp.float64)
+        args.lmds, args.pis = loopy_bp.bp_initialize_msg(args)
+        args.log_obs_mat = sp.zeros((args.I,args.T,args.K), dtype=float_type)
         vb_mf.make_log_obs_matrix(args)
 
         args.update_q_func = loopy_bp.bp_update_msg_new
@@ -899,11 +902,11 @@ def make_tree(args):
 def random_params(K, L):
     """Create and normalize random parameters for Mean-Field inference"""
     #sp.random.seed([5])
-    theta = sp.rand(K, K, K).astype(sp.float64)
-    alpha = sp.rand(K, K).astype(sp.float64)
-    beta = sp.rand(K, K).astype(sp.float64)
-    gamma = sp.rand(K).astype(sp.float64)
-    emit_probs = sp.rand(K, L).astype(sp.float64)
+    theta = sp.rand(K, K, K).astype(float_type)
+    alpha = sp.rand(K, K).astype(float_type)
+    beta = sp.rand(K, K).astype(float_type)
+    gamma = sp.rand(K).astype(float_type)
+    emit_probs = sp.rand(K, L).astype(float_type)
     vb_mf.normalize_trans(theta, alpha, beta, gamma)
     return theta, alpha, beta, gamma, emit_probs
 
@@ -1080,7 +1083,7 @@ def histogram_reads(bam_file, windowsize, chromosomes='all'):
     chrom_starts = dict(zip(chromosomes, [0] + chrom_ends[:-1]))
 
     # create the histogram: 1 x sum(lengths) array
-    read_counts = sp.zeros(chrom_ends[-1], dtype=sp.float64)
+    read_counts = sp.zeros(chrom_ends[-1], dtype=float_type)
 
     # count the reads in the input
     for read in reads_bam:

@@ -16,15 +16,17 @@ from libc.math cimport exp, log
 from vb_mf import normalize_trans, normalize_emit, make_log_obs_matrix
 
 def prodc_initialize_qs(theta, alpha, beta, gamma, emit_probs, X, log_obs_mat):
+#ctypedef np.float128_t float_type
+ctypedef long double float_type
     I, T, L = X.shape
     #I = 1
     K = alpha.shape[0]
-    a_s = np.zeros((T,K)) 
-    b_s = np.zeros((T,K))
-    Q = np.zeros((I,T,K), dtype=np.float64) 
-    Q_pairs = np.zeros((I,T,K,K), dtype=np.float64)
-    loglh = np.zeros(I)
-    
+    a_s = np.zeros((T,K), dtype=np.longdouble)
+    b_s = np.zeros((T,K), dtype=np.longdouble)
+    Q = np.zeros((I,T,K), dtype=np.longdouble)
+    Q_pairs = np.zeros((I,T,K,K), dtype=np.longdouble)
+    loglh = np.zeros(I, dtype=np.longdouble)
+    print 'initializing Q',
     for i in range(I):
         #emit_probs_mat = np.exp(log_emit_probs_i(emit_probs, X, i))
         emit_probs_mat = np.exp(log_obs_mat[i,:,:]).T
@@ -90,61 +92,70 @@ def prodc_update_q(args):
 
 
 
-cpdef prodc_update_qs_i_new(int si, np.ndarray[np.float64_t, ndim=3] theta,
-                        np.ndarray[np.float64_t, ndim=2] alpha,
-                        np.ndarray[np.float64_t, ndim=2] beta,
-                        np.ndarray[np.float64_t, ndim=1] gamma,
-                        np.ndarray[np.float64_t, ndim=2] emit_probs,
-                        np.ndarray[np.int8_t, ndim=3] X,
-                        np.ndarray[np.float64_t, ndim=3] Q,
-                        np.ndarray[np.float64_t, ndim=4] Q_pairs,
+
+def prodc_update_qs_i_new(int si, np.ndarray[float_type, ndim=3] theta,
+                        np.ndarray[float_type, ndim=2] alpha,
+                        np.ndarray[float_type, ndim=2] beta,
+                        np.ndarray[float_type, ndim=1] gamma,
+                        np.ndarray[float_type, ndim=3] Q,
+                        np.ndarray[float_type, ndim=4] Q_pairs,
                         np.ndarray[np.int8_t, ndim=1] vert_parent,
                         vert_children,
-                        np.ndarray[np.float64_t, ndim=3] log_obs_mat):
+                        np.ndarray[float_type, ndim=3] log_obs_mat, args):
     cdef:
         Py_ssize_t I = Q.shape[0], T = Q.shape[1], K = Q.shape[2]
         Py_ssize_t i,t,v,h,k, ch_i, vp, len_v_chs
-        np.ndarray[np.float64_t, ndim=1] log_gamma
-        np.ndarray[np.float64_t, ndim=2] log_alpha, log_beta
-        np.ndarray[np.float64_t, ndim=3] log_theta, transmat
-        np.ndarray[np.float64_t, ndim=1] g_t, log_g_t, f1, log_f1, b_t, a_t, s_t, prev_b_t, prev_a_t
-        #np.ndarray[np.float64_t, ndim=1] loglh
-        np.ndarray[np.float64_t, ndim=2] a_s, b_s, emit_probs_mat, log_f, f_t
-        np.float64_t tmpsum_q, tmpsum_qp, total_f1, g_t_max
-    
+        np.ndarray[float_type, ndim=1] log_gamma
+        np.ndarray[float_type, ndim=2] log_alpha, log_beta
+        np.ndarray[float_type, ndim=3] log_theta, transmat
+        np.ndarray[float_type, ndim=1] g_t, log_g_t, f1, log_f1, b_t, a_t, s_t, prev_b_t, prev_a_t
+        #np.ndarray[float_type, ndim=1] loglh
+        np.ndarray[float_type, ndim=2] a_s, b_s, emit_probs_mat, log_f, f_t
+        float_type tmpsum_q, tmpsum_qp, total_f1, g_t_max
+
+    #cdef np.ndarray[float_type, ndim=3] X = args.X
+    X = args.X.astype(np.longdouble)
     # first calculate the transition matrices (all different for different t) for chain si
-    #print 'prodc_update_qs'
-    a_s = np.zeros((T,K), dtype=np.float64)
-    b_s = np.zeros((T,K), dtype=np.float64)
-    transmat = np.zeros((T, K, K), dtype=np.float64)
+    print 'prodc_update_qs'
+    a_s = np.zeros((T,K), dtype=np.longdouble)
+    b_s = np.zeros((T,K), dtype=np.longdouble)
+    transmat = np.zeros((T, K, K), dtype=np.longdouble)
     #loglh = np.zeros(I)
     emit_probs_mat = np.exp(log_obs_mat[si,:,:]).T
+    if np.any(emit_probs_mat < min_val):
+        print 'applying minimum probability to emit probs'
+        emit_probs_mat[emit_probs_mat < min_val] = min_val
     #emit_probs_mat = np.exp(log_emit_probs_i(emit_probs, X, si))
     #start from the last node
+    np.seterr(under='ignore')
     log_theta = np.log(theta)
     log_alpha = np.log(alpha)
     log_beta = np.log(beta)
     log_gamma = np.log(gamma)
-    
-    g_t = np.ones(K, dtype=np.float64) # initialize for last node
+    for mat in [log_theta, log_alpha, log_beta, log_gamma]:
+        mat[mat < -min_val] = -min_val
+    np.seterr(under='print')
+
+    g_t = np.ones(K, dtype=np.longdouble) # initialize for last node
     log_g_t = np.log(g_t)
     tmpsum_q = 0.
     tmpsum_qp = 0.
-    
+
     # TODO finish
-    b_t = np.ones(K)
+    b_t = np.ones(K, dtype=np.longdouble)
     b_s[T-1,:] = b_t
-    a_t = np.zeros(K, dtype=np.float64)
-    s_t = np.zeros(T, dtype=np.float64)
-    f1 = np.zeros(K, dtype=np.float64)
-    log_f1 = np.zeros(K, dtype=np.float64)
-    f_t = np.zeros((K,K), dtype=np.float64)
-    log_f = np.zeros((K,K), dtype=np.float64)
+    a_t = np.zeros(K, dtype=np.longdouble)
+    s_t = np.zeros(T, dtype=np.longdouble)
+    f1 = np.zeros(K, dtype=np.longdouble)
+    log_f1 = np.zeros(K, dtype=np.longdouble)
+    f_t = np.zeros((K,K), dtype=np.longdouble)
+    log_f = np.zeros((K,K), dtype=np.longdouble)
     total_f1 = 0.
     g_t_max = 0.
-    prev_b_t = np.ones(K, dtype=np.float64)
-    prev_a_t = np.zeros(K, dtype=np.float64)
+    prev_b_t = np.ones(K, dtype=np.longdouble)
+    prev_a_t = np.zeros(K, dtype=np.longdouble)
 
+    print 'starting fw-bw algorithm',
 
     vp = vert_parent[si]
     # update transition along nodes
@@ -450,19 +461,19 @@ def log_emit_probs_i(emit_probs, X, i):
 
 def prodc_update_params(args, renormalize=True):
     cdef:
-        np.ndarray[np.int8_t, ndim=3] X
-        np.ndarray[np.float64_t, ndim=3] Q
-        np.ndarray[np.float64_t, ndim=4] Q_pairs
-        np.ndarray[np.float64_t, ndim=3] theta
-        np.ndarray[np.float64_t, ndim=2] alpha, beta, emit_probs
-        np.ndarray[np.float64_t, ndim=1] gamma
+        #np.ndarray[np.int8_t, ndim=3] X
+        np.ndarray[float_type, ndim=3] Q
+        np.ndarray[float_type, ndim=4] Q_pairs
+        np.ndarray[float_type, ndim=3] theta
+        np.ndarray[float_type, ndim=2] alpha, beta, emit_probs
+        np.ndarray[float_type, ndim=1] gamma
         np.ndarray[np.int8_t, ndim=1] vert_parent
-        np.ndarray[np.float64_t, ndim=3] log_obs_mat
-        np.float64_t pseudocount
+        np.ndarray[float_type, ndim=3] log_obs_mat
+        float_type pseudocount
     X = args.X
-    Q, Q_pairs, theta, alpha, beta, gamma, emit_probs, vert_parent, vert_children, log_obs_mat, pseudocount = (args.Q, args.Q_pairs, args.theta,
+    Q, Q_pairs, theta, alpha, beta, gamma, vert_parent, vert_children, log_obs_mat, pseudocount = (args.Q, args.Q_pairs, args.theta,
                                                    args.alpha, args.beta,
-                                                   args.gamma, args.emit_probs, args.vert_parent, args.vert_children, args.log_obs_mat, args.pseudocount)
+                                                   args.gamma, args.vert_parent, args.vert_children, args.log_obs_mat, args.pseudocount)
     cdef int I = Q.shape[0], T = Q.shape[1], K = Q.shape[2]
     cdef int L = X.shape[2]
     cdef Py_ssize_t i,t,v,h,k,vp,l
@@ -498,22 +509,25 @@ def prodc_update_params(args, renormalize=True):
     make_log_obs_matrix(args)
 
 cpdef np.float64_t prodc_free_energy(args):
+#cpdef float_type prodc_free_energy(args):
+def prodc_free_energy(args):
     """Calculate the free energy for Q"""
-    cdef np.int8_t[:,:,:] X
-    cdef np.ndarray[np.float64_t, ndim=3] Q, theta
-    cdef np.float64_t[:,:,:,:] Q_pairs
-    cdef np.float64_t[:,:] alpha, beta, emit
-    cdef np.float64_t[:] gamma
+    #cdef np.int8_t[:,:,:] X
+    cdef np.ndarray[float_type, ndim=3] Q, theta
+    cdef float_type[:,:,:,:] Q_pairs
+    cdef float_type[:,:] alpha, beta
+    cdef float_type[:] gamma
     cdef np.int8_t[:] vert_parent
-    cdef np.float64_t[:,:,:] log_obs_mat
-    X, Q, Q_pairs, theta, alpha, beta, gamma, emit, vert_parent, vert_children, log_obs_mat = (args.X, args.Q, args.Q_pairs, args.theta,
+    cdef float_type[:,:,:] log_obs_mat
+    X, Q, Q_pairs, theta, alpha, beta, gamma, vert_parent, vert_children, log_obs_mat = (args.X, args.Q, args.Q_pairs, args.theta,
                                                    args.alpha, args.beta,
-                                                   args.gamma, args.emit_probs, args.vert_parent, args.vert_children, args.log_obs_mat)
+                                                   args.gamma, args.vert_parent, args.vert_children, args.log_obs_mat)
     cdef Py_ssize_t I = Q.shape[0], T = Q.shape[1], K = Q.shape[2]
     cdef Py_ssize_t i,t,v,h,k, ch_i, vp, len_v_chs
-    cdef np.float64_t[:] log_gamma
-    cdef np.float64_t[:,:] log_alpha, log_beta
-    cdef np.float64_t[:,:,:] log_theta
+    cdef float_type[:] log_gamma
+    cdef float_type[:,:] log_alpha, log_beta
+    cdef float_type[:,:,:] log_theta
+    cdef float_type val = 0
     #print 'mf_free_energy'
     log_theta = np.log(theta)
     log_alpha = np.log(alpha)
@@ -521,7 +535,7 @@ cpdef np.float64_t prodc_free_energy(args):
     log_gamma = np.log(gamma)
     
     # Q * logQ
-    cdef np.float64_t total_free = 0., q_cond = 0.
+    cdef float_type total_free = 0., q_cond = 0.
     for i in xrange(I):
     #for i in prange(I, nogil=True):
         for k in xrange(K):
