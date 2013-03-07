@@ -57,6 +57,8 @@ from math import ceil
 import cPickle as pickle
 import copy
 import re
+import tarfile
+from cStringIO import StringIO
 import time
 import random
 
@@ -246,7 +248,7 @@ def do_inference(args):
     """Perform the type of inference specified in args"""
     # set up
     if args.quiet_mode:
-        sys.stdout = open('log_%s.log' , 'w')
+        sys.stdout = open('log_%s.log' , 'a')
     init_args_for_inference(args)
     print 'done making args'
     args.out_dir = args.out_dir.format(timestamp=time.strftime('%x_%X').replace('/','-'), **args.__dict__)
@@ -256,10 +258,13 @@ def do_inference(args):
         os.makedirs(args.out_dir)
     except OSError:
         pass
-    
-    if not args.subtask and args.plot_iter != 0:
-        plot_data(args)
-    
+
+    if not args.subtask:
+        args.iteration = '0_initial'
+        plot_params(args)
+        if args.plot_iter >= 2:
+            plot_data(args)
+
     for i in xrange(1, args.max_iterations+1):
         if not args.subtask:
             args.iteration = i
@@ -282,7 +287,7 @@ def do_inference(args):
             else:
                 print 'loopy %s E steps' %j
                 if loopy_bp.bp_check_convergence(args):
-                    args.last_free_energy = f = args.free_energy_func(args)
+                    args.last_free_energy = f = abs(args.free_energy_func(args))
                     break
         print '# saving Q distribution'
         if args.continuous_observations:
@@ -333,6 +338,8 @@ def do_inference(args):
                 plot_Q(args)
                 plot_energy(args)
             
+                if args.plot_iter >= 2:
+                    plot_Q(args)
             #import ipdb; ipdb.set_trace()
             if args.compare_inf is not None:
                 args.log_obs_mat = sp.zeros((args.I,args.T,args.K), dtype=float_type)
@@ -568,6 +575,60 @@ def init_args_for_inference(args):
     else:
         raise RuntimeError('%s not recognized as valid inference method!' % args.approx)
 
+def distance(x1, x2):
+    return scipy.sqrt((x1 - x2) * (x1 - x2)).sum()
+
+def initialize_mean_variance(args):
+    """Initialize the current mean and variance values semi-intelligently.
+
+    Inspired by the kmeans++ algorithm: iteratively choose new centers from the data
+    by weighted sampling, favoring points that are distant from those already chosen
+    """
+    X = args.X.reshape(args.X.shape[0] * args.X.shape[1], args.X.shape[2])
+
+    # kmeans++ inspired choice
+    centers = [random.choice(X)]
+    min_dists = scipy.array([distance(centers[-1], x) for x in X])
+    for l in range(1, args.K):
+        weights = min_dists * min_dists
+        new_center = weighted_sample(zip(weights, X), 1).next()
+        centers.append(new_center)
+
+        min_dists = scipy.fmin(min_dists, scipy.array([distance(centers[-1], x) for x in X]))
+
+    means = scipy.array(centers)
+
+    # for the variance, get the variance of the data in this cluster
+    variances = []
+    for c in centers:
+        idxs = tuple(i for i, (x, m) in enumerate(zip(X, min_dists)) if distance(c, x) == m)
+        v = scipy.var(X[idxs, :], axis=0)
+        variances.append(v)
+    variances = scipy.array(variances) + args.pseudocount
+
+    #import pdb; pdb.set_trace()
+    #for k in range(args.K):
+    #    print sp.sqrt(variances[k,:])
+    variances[variances < .1] = .1
+
+    return means, variances
+
+
+def weighted_sample(items, n):
+    total = float(sum(w for w, v in items))
+    i = 0
+    w, v = items[0]
+    while n:
+        x = total * (1 - random.random() ** (1.0 / n))
+        total -= x
+        while x > w:
+            x -= w
+            i += 1
+            w, v = items[i]
+        w -= x
+        yield v
+        n -= 1
+
 
 def make_parser():
     """Make a parser for variational inference"""
@@ -591,15 +652,21 @@ def make_parser():
     convert_parser.add_argument('--chromosomes', nargs='+', default='all',
                                 help='which chromosomes to convert. By default,'
                                 ' convert all autosomes')
+    convert_parser.add_argument('--min_reads', type=float, default=.5,
+                              help='The minimum number of reads for a region to be included. default: %(default)s')
+    convert_parser.add_argument('--min_size', type=int, default=25,
+                              help='The minimum length (in bins) to include a chunk. default: %(default)s')
     convert_parser.add_argument('--max_pvalue', type=float, default=1e-4,
                         help='p-value threshold to consider the read count'
                         ' significant, using a local poisson rate defined by'
                         ' the control data')
     convert_parser.add_argument('--outfile', default='observations.npy',
                                 help='Where to save the binarized reads')
+    #convert_parser.add_argument('--bam_template', help='bam file template.',
+    #                default='wgEncodeBroadHistone{species}{mark}StdAlnRep*.bam')
     convert_parser.add_argument('--bam_template', help='bam file template.',
-                    default='wgEncodeBroadHistone{species}{mark}StdAlnRep*.bam')
-    convert_parser.set_defaults(func=convert_data)
+                default='wgEncode*{species}{mark}*Rep*.bam')
+    convert_parser.set_defaults(func=convert_data_continuous_features_and_split)
 
     # to trim off telomeric regions
     trim_parser = tasks_parser.add_parser('trim', help='trim off regions without'
@@ -729,8 +796,8 @@ def plot_energy_comparison(args):
     pyplot.legend(names,loc='lower right')
     #pyplot.title('Free energy learning with %s' % args.approx)
     formatter = pyplot.ScalarFormatter(useMathText=True)
-    formatter.set_scientific(True) 
-    formatter.set_powerlimits((-3,3)) 
+    formatter.set_scientific(True)
+    formatter.set_powerlimits((-3,3))
     pyplot.gca().yaxis.set_major_formatter(formatter)
     pyplot.xlabel("Iteration")
     pyplot.ylabel('-Free Energy')
@@ -743,12 +810,22 @@ def plot_energy(args):
     pyplot.savefig(os.path.join(args.out_dir, outfile))
     pyplot.figure()
     pyplot.title('Free energy for %s' % args.approx)
-    pyplot.plot([-f for f in args.free_energy])
+    pyplot.plot([-f for f in args.free_energy], label='Current run')
     pyplot.xlabel("iteration")
     pyplot.ylabel('-Free Energy')
     pyplot.savefig(os.path.join(args.out_dir, outfile))
     pyplot.close('all')
 
+    if hasattr(args, 'prev_free_energy'):
+        pyplot.figure()
+        pyplot.title('Free energy for %s' % args.approx)
+        pyplot.plot(range(len(args.prev_free_energy)), [-f for f in args.prev_free_energy], linestyle='-', label='Previous run')
+        pyplot.plot(range(len(args.prev_free_energy), len(args.free_energy) + len(args.prev_free_energy)), [-f for f in args.free_energy], label='Current run')
+        pyplot.legend(loc='lower left')
+        pyplot.xlabel("iteration")
+        pyplot.ylabel('-Free Energy')
+        pyplot.savefig(os.path.join(args.out_dir, (args.out_params + 'vs_previous.png').format(param='free_energy', **args.__dict__)))
+        pyplot.close('all')
 def plot_Q(args):
     """Plot Q distribution"""
     outfile = (args.out_params + '_it{iteration}.png').format(param='Q', **args.__dict__)
@@ -792,7 +869,7 @@ def plot_params(args):
     """Plot alpha, theta, and the emission probabilities"""
     old_err = sp.seterr(under='ignore')
     oldsize = matplotlib.rcParams['font.size']
-    K, L = args.emit_probs.shape
+    K, L = args.emit_probs.shape if not args.continuous_observations else args.means.shape
 
     # alpha
     #matplotlib.rcParams['font.size'] = 12
@@ -1066,8 +1143,8 @@ def make_tree(args):
     #tree_by_parents = {0:sp.inf, 1:0}  # 3 species, 2 with one parent
     #tree_by_parents = dict((args.species.index(k), args.species.index(v)) for k, v in phylogeny.items())
     tree_by_parents = dict((valid_species.index(k), valid_species.index(v)) for k, v in phylogeny.items() if valid_species.index(k) in xrange(I) and valid_species.index(v) in xrange(I))
-    tree_by_parents[0] = sp.inf
-    print tree_by_parents
+    tree_by_parents[0] = sp.inf #'Null'
+    print tree_by_parents.keys()
     # [inf, parent(1), parent(2), ...]
     global vert_parent
     #I = max(tree_by_parents) + 1
@@ -1076,6 +1153,8 @@ def make_tree(args):
                                     xrange(I)], dtype=sp.int8)  # error if 0's parent is accessed
     args.vert_parent = vert_parent
 
+    print 'vert_parent', vert_parent
+#    args.vert_parent = tree_by_parents
     # {inf:0, 0:[1,2], 1:[children(1)], ...}
     global vert_children
     vert_children = dict((pa, []) for pa in
