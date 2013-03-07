@@ -225,7 +225,18 @@ def main(argv=sys.argv[1:]):
         for obs in args.observe_matrix:
             all_obs.extend(glob.glob(obs))
         args.observe_matrix = all_obs
-        
+
+        if args.approx == 'gmtk':
+            args.subtask = False
+            obs_mat = args.observe_matrix
+            args.observe_matrix = args.observe_matrix[0]
+            init_args_for_inference(args)
+            args.observe_matrix = obs_mat
+            del args.func
+            vb_gmtkExact.mark_avail = args.mark_avail
+            vb_gmtkExact.run_gmtk_lineagehmm(args)
+            return
+
         if len(args.observe_matrix) > 1:
             print 'parallel inference on %s jobs' % len(args.observe_matrix)
             args.func = do_parallel_inference
@@ -335,9 +346,7 @@ def do_inference(args):
 
             if args.plot_iter != 0 and i % args.plot_iter == 0:
                 plot_params(args)
-                plot_Q(args)
                 plot_energy(args)
-            
                 if args.plot_iter >= 2:
                     plot_Q(args)
             #import ipdb; ipdb.set_trace()
@@ -572,6 +581,8 @@ def init_args_for_inference(args):
         args.free_energy_func = loopy_bp.bp_bethe_free_energy
         #args.free_energy_func = loopy_bp.bp_mf_free_energy
         args.converged_func = loopy_bp.bp_check_convergence
+    elif args.approx == 'gmtk':
+        pass
     else:
         raise RuntimeError('%s not recognized as valid inference method!' % args.approx)
 
