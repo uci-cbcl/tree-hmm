@@ -122,9 +122,9 @@ valid_marks = ['Ctcf', 'H3k27me3', 'H3k36me3', 'H4k20me1', 'H3k4me1', 'H3k4me2',
 phylogeny = {'H1hesc':'H1hesc', 'Huvec':'H1hesc', 'Hsmm':'H1hesc',
              'Nhlf':'H1hesc', 'Gm12878':'H1hesc', 'K562':'H1hesc',
              'Nhek':'H1hesc', 'Hmec':'H1hesc', 'Hepg2':'H1hesc'}
-inference_types = ['mf', 'poc', 'pot', 'clique', 'concat', 'loopy']
 
 
+inference_types = ['mf', 'poc', 'pot', 'clique', 'concat', 'loopy', 'gmtk', 'indep']
 def main(argv=sys.argv[1:]):
     """run a variational bayes algorithm"""
     # parse arguments, then call convert_data or do_inference
@@ -427,6 +427,28 @@ def init_args_for_inference(args):
         args.update_q_func = vb_prodc.prodc_update_q
         args.update_param_func = vb_prodc.prodc_update_params
         args.free_energy_func = vb_prodc.prodc_free_energy
+        args.converged_func = vb_mf.mf_check_convergence
+    elif args.approx == 'indep':  # completely independent chains
+        args.log_obs_mat = sp.zeros((args.I, args.T, args.K), dtype=float_type)
+        if args.continuous_observations:
+            vb_mf.make_log_obs_matrix_gaussian(args)
+        else:
+            vb_mf.make_log_obs_matrix(args)
+
+        if not args.subtask or args.iteration == 0:
+            print '# generating Qs'
+            args.Q = sp.zeros((args.I, args.T, args.K), dtype=float_type)
+            args.Q_pairs = sp.zeros((args.I, args.T, args.K, args.K), dtype=float_type)
+            vb_independent.independent_update_qs(args)
+        #else:
+        #    q_path = os.path.join(args.out_dir, args.out_params.format(param='Q', **args.__dict__))
+        #    print 'loading previous Q from %s' % q_path
+        #    args.Q = sp.load(q_path)
+        #    args.Q_pairs = sp.load(os.path.join(args.out_dir, args.out_params.format(param='Q_pairs', **args.__dict__)))
+
+        args.update_q_func = vb_independent.independent_update_qs
+        args.update_param_func = vb_independent.independent_update_params
+        args.free_energy_func = vb_independent.independent_free_energy
         args.converged_func = vb_mf.mf_check_convergence
     elif args.approx == 'pot':  # product-of-trees approximation
         raise NotImplementedError("Product of Trees is not implemented yet!")

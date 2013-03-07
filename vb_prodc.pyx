@@ -478,9 +478,10 @@ def prodc_free_energy(args):
     log_alpha = np.log(alpha)
     log_beta = np.log(beta)
     log_gamma = np.log(gamma)
-    
+
     # Q * logQ
     cdef float_type total_free = 0., q_cond = 0.
+    np.seterr(under='ignore')
     for i in xrange(I):
     #for i in prange(I, nogil=True):
         for k in xrange(K):
