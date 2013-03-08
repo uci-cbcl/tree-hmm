@@ -1,8 +1,49 @@
+import sys
+
 from distutils.core import setup
 from distutils.extension import Extension
-from Cython.Distutils import build_ext
-import numpy
-from IPython.core.release import long_description
+
+
+try:
+    from Cython.Distutils import build_ext
+except ImportError:
+    sys.stderr.write("""
+    ==================================================
+
+    Please install Cython (http://cython.org/),
+    which is required to build tree-hmm. Usually
+    you can do:
+
+        pip install -U cython
+
+    or
+
+        easy_install -U cython
+
+    ==================================================
+    """)
+    sys.exit(1)
+
+try:
+    import numpy
+except ImportError:
+    sys.stderr.write("""
+    ==================================================
+
+    Please install numpy,
+    which is required to build tree-hmm. Usually
+    you can do:
+
+        pip install -U numpy
+
+    or
+
+        easy_install -U numpy
+
+    ==================================================
+    """)
+    sys.exit(1)
+
 
 ext_modules = [Extension("treehmm/vb_mf", ["treehmm/vb_mf.pyx"],
                          #extra_compile_args=['-fopenmp', '-march=bdver1', '-mtune=bdver1', '-Ofast'],
@@ -30,6 +71,12 @@ ext_modules = [Extension("treehmm/vb_mf", ["treehmm/vb_mf.pyx"],
                          include_dirs=[numpy.get_include()]),
                 ]
 
+
+install_requires = ['scipy', 'cython ( >= 0.15.1)']
+if sys.version_info[:2] < (2, 7):
+    install_requires += ['argparse']
+
+
 setup(
   name = 'treehmm',
   description = 'Variational Inference for tree-structured Hidden-Markov Models',
@@ -42,5 +89,10 @@ setup(
   scripts = ['bin/tree-hmm'],
   cmdclass = {'build_ext': build_ext},
   ext_modules = ext_modules,
-  requires = ['scipy', 'cython ( >= 0.15.1)']
+  requires = ['scipy', 'cython ( >= 0.15.1)', 'numpy'],
+  classifiers=[
+            'Development Status :: 3 - Alpha',
+            'Intended Audience :: Science/Research',
+            'License :: OSI Approved :: GNU General Public License (GPL)',
+            'Topic :: Scientific/Engineering :: Bio-Informatics'],
 )
