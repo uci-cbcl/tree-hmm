@@ -5,4 +5,5 @@ build
 infer_out
 .project
 .pydevproject
+.externalToolBuilders
 *.swp

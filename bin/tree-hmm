@@ -1,0 +1,9 @@
+#!/usr/bin/env python
+
+import treehmm
+
+def dependencies_for_freezing():
+    from scipy.io.matlab import streams
+
+if __name__ == '__main__':
+    treehmm.main()

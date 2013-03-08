@@ -102,13 +102,12 @@ def workspace_to_npy_args(filename):
 
 
 def plot_params(wkspacefile):
-    import histone_tree_hmm
     args = workspace_to_npy_args(wkspacefile)
     try:
         os.mkdir(args.out_dir)
     except:
         pass
-    histone_tree_hmm.plot_params(args)
+    plot_params(args)
 
 
 def get_npy_params_as_args(observe, path='.', approx='clique', template='{path}/{approx}_{param}_{observe}'):
@@ -121,30 +120,9 @@ def get_npy_params_as_args(observe, path='.', approx='clique', template='{path}/
 
 
 def write_workspace_simple_master(workspace, filename='input.master'):
-    print 'writing simple workspace master file'
     cpts = workspace.objects[gmtkParam.DCPT]
     io = gmtkParam.WorkspaceIO.withFile(filename, 'w')
     try:
-        io._file.write("""
-
-MEAN_IN_FILE inline 2
-0 gauss_emit_1_mean   1   1.0
-1 gauss_emit_2_mean   1   50.0
-
-COVAR_IN_FILE inline 2
-0 gauss_emit_1_covar   1   1.0
-1 gauss_emit_2_covar   1   50.0
-
-MC_IN_FILE inline 2
-0 1 0 gauss_emit_probs_1   gauss_emit_1_mean   gauss_emit_1_covar
-1 1 0 gauss_emit_probs_2   gauss_emit_2_mean   gauss_emit_2_covar
-
-DT_IN_FILE inline 1
-0 parent_val 1
-    -1 { p0 }
-
-""")
-
         io._file.write('DENSE_CPT_IN_FILE inline\n')
         io.writeInt(len(cpts))
         io.writeNewLine()
@@ -183,11 +161,9 @@ def make_lineage_model(filename, I, K, L, vert_parent, mark_avail, separate_thet
                    for i in range(2, I+1)])
 
     obs_tmpl = """variable : %(name)s {
-        type : continuous observed %(index)s:%(index)s;
+        type : discrete observed %(index)s:%(index)s cardinality 2;
         switchingparents : nil;
-        conditionalparents : %(parent)s
-            using collection("global") mixGaussian mapping("parent_val");
-
+        conditionalparents : %(parent)s using DenseCPT("%(param)s");
     }"""
     #obs_hidden_tmpl = """variable : %(name)s {
     #    type : discrete hidden cardinality 2;
@@ -384,8 +360,6 @@ def parse_viterbi_states_to_Q(args, gmtk_obs):
 
 
 def run_gmtk_lineagehmm(args):
-    #import histone_tree_hmm_gmtk as histone_tree_hmm
-    import histone_tree_hmm
     try:
         os.mkdir('gmtk_images')
     except:
@@ -397,7 +371,7 @@ def run_gmtk_lineagehmm(args):
     args.out_params = 'gmtk_images/gmtk_{param}_{observe}'
     args.out_dir = '.'
     args.free_energy = []
-    histone_tree_hmm.plot_params(args)
+    plot_params(args)
     # convert .npy parameters and data into gmtk format
     args.observe_txt = []
     for f in args.observe_matrix:
@@ -406,29 +380,8 @@ def run_gmtk_lineagehmm(args):
 
     # prepare and triangulate the graphical model
     strfile = 'lineagehmm.str'
-    gmtk_master = 'dummy.master'
-    with open(gmtk_master, 'w') as outfile:
-        outfile.write('''
-
-MEAN_IN_FILE inline 2
-0 gauss_emit_1_mean   1   1.0
-1 gauss_emit_2_mean   1   50.0
-
-COVAR_IN_FILE inline 2
-0 gauss_emit_1_covar   1   1.0
-1 gauss_emit_2_covar   1   50.0
-
-MC_IN_FILE inline 2
-0 1 0 gauss_emit_probs_1   gauss_emit_1_mean   gauss_emit_1_covar
-1 1 0 gauss_emit_probs_2   gauss_emit_2_mean   gauss_emit_2_covar
-
-DT_IN_FILE inline 1
-0 parent_val 1
-    -1 { p0 }
-
-''')
     make_lineage_model(strfile, obs.shape[0], args.K, obs.shape[2], vert_parent=args.vert_parent, mark_avail=mark_avail, separate_theta=args.separate_theta)
-    cmd = 'gmtkTriangulate -strFile %s -inputMasterFile %s -rePart T -findBest T  -triangulation completed ' % (strfile, gmtk_master)
+    cmd = 'gmtkTriangulate -strFile %s -rePart T -findBest T  -triangulation completed ' % strfile
     #cmd = 'gmtkTriangulate -strFile %s' % strfile
     subprocess.check_call(cmd, shell=True)
 
@@ -483,8 +436,8 @@ DT_IN_FILE inline 1
         # run one final accumulator to get params
         accumulate_em_runs(args, gmtk_obs, gmtk_master)
 
-        histone_tree_hmm.plot_params(args)
-        histone_tree_hmm.plot_energy(args)
+        plot_params(args)
+        plot_energy(args)
 
         #check convergence
         f = args.free_energy[-1]

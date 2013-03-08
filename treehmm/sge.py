@@ -343,11 +343,11 @@ class SGEPool:
             #print os.environ['PYTHONPATH']
             #print pickle.dumps(os.environ['PYTHONPATH'])
             #pickle.dump(os.environ['PYTHONPATH'], workFile)   # dump all data about environment variables
-            pickle.dump(self.initializer, workFile)
+            pickle.dump(self.initializer, workFile, -1)
             if mode == 'map':
-                pickle.dump(self.initargs, workFile)
+                pickle.dump(self.initargs, workFile, -1)
             try:
-                pickle.dump(func, workFile)         # dump mapping function
+                pickle.dump(func, workFile, -1)         # dump mapping function
             except TypeError as e:
                 # Failure pickling function-- probably a lambda function
                 os.remove(workFile.name)
@@ -355,7 +355,7 @@ class SGEPool:
             curDataCount = 0
             for data in curChunks:
                 curDataCount += 1
-                pickle.dump(data, workFile)
+                pickle.dump(data, workFile, -1)
             if curDataCount == 0:
                 # no data was sliced from original dataset-- we are done
                 moreData = False
@@ -549,7 +549,7 @@ def main():
                     initargs = None
             except Exception as e:
                 # save and return the exception, to be debugged upstream
-                pickle.dump(type(e)(('Error Loading initializer from pickle file',) + e.args), outputPickleFile)
+                pickle.dump(type(e)(('Error Loading initializer from pickle file',) + e.args), outputPickleFile, -1)
                 raise
             else:
                 if initializer is not None:
@@ -560,7 +560,7 @@ def main():
             try:
                 func = pickle.load(inputPickleFile)
             except AttributeError as e:
-                pickle.dump(e, outputPickleFile)  # Error loading
+                pickle.dump(e, outputPickleFile, -1)  # Error loading
                 raise
             else:
                 # If I didn't want error checking on each step, I'd do this at the top level:
@@ -577,7 +577,7 @@ def main():
                             try:
                                 data = pickle.load(data.outputFile)
                             except Exception as e:
-                                pickle.dump(type(e)(("Error loading previous Job's results! ",) + e.args), outputPickleFile)
+                                pickle.dump(type(e)(("Error loading previous Job's results! ",) + e.args), outputPickleFile, -1)
                                 raise
                         curData.append(data)
                         if opts.mode == 'map':
@@ -586,11 +586,11 @@ def main():
                                 result = func(curData.pop(0))
                             except Exception as e:
                                 # save and return the exception, to be debugged upstream
-                                pickle.dump(type(e)(('Error in map function: ',) + e.args), outputPickleFile)
+                                pickle.dump(type(e)(('Error in map function: ',) + e.args), outputPickleFile, -1)
                                 raise
                             else:
                                 print 'saving', result
-                                pickle.dump(result, outputPickleFile)
+                                pickle.dump(result, outputPickleFile, -1)
                         else:
                             # reduce curData
                             result = reduce(func, curData[:2], initializer)

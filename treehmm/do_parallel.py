@@ -19,8 +19,8 @@ def do_parallel_inference(args):
     """Perform inference in parallel on several observations matrices with
     joint parameters
     """
-    from histone_tree_hmm import random_params, do_inference, plot_params, plot_energy, load_params
-    from vb_mf import normalize_trans
+    from treehmm import random_params, do_inference, plot_params, plot_energy, load_params
+    from treehmm.vb_mf import normalize_trans
 
     _x = sp.load(args.observe_matrix[0])
     args.continuous_observations = _x.dtype != sp.int8
@@ -84,7 +84,7 @@ def do_parallel_inference(args):
         pool = multiprocessing.Pool()
     else:
         pool = sge.SGEPool()
-        job_handle = pool.imap_unordered(do_inference, job_args)
+        #job_handle = pool.imap_unordered(do_inference, job_args)
 
     converged = False
     for args.iteration in range(args.max_iterations):
