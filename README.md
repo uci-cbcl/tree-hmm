@@ -1,7 +1,12 @@
 tree-hmm
 ========
 
-A Tree hidden Markov model for learning epigenetic states in multiple cell types
+A Tree hidden Markov model for learning epigenetic states in multiple cell types. This 
+package is similar to the bioinformatics tools ChromHMM and Segway, except that it 
+allows the user to explicitly model the relationships between cell types or species.
+
+
+Please see our paper for further details! http://www.ncbi.nlm.nih.gov/pubmed/23734743
 
 
 Quickstart
