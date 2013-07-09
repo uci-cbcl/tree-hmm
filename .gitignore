@@ -7,3 +7,10 @@ infer_out
 .pydevproject
 .externalToolBuilders
 *.swp
+jobs
+*.egg-info
+*.log
+*.png
+*.npy
+data
+*.pkl
