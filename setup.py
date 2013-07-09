@@ -81,7 +81,7 @@ setup(
   name = 'treehmm',
   description = 'Variational Inference for tree-structured Hidden-Markov Models',
   version = '0.1.0',
-  author = ['Jake Biesinger', 'Yuanfeng Wang'],
+  author = 'Jake Biesinger, Yuanfeng Wang, Xiaohui Xie',
   author_email = 'jake.biesinger@gmail.com',
   url = 'https://github.com/uci-cbcl/tree-hmm',
   long_description = open('README.rst').read(),

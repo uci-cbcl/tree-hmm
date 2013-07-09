@@ -7,6 +7,8 @@ the user to explicitly model the relationships between cell types or
 species. Please see our `paper <http://www.ncbi.nlm.nih.gov/pubmed/23734743>`_ 
 for further details!
 
+For the development version, see our page on 
+`Github <https://github.com/uci-cbcl/tree-hmm>`_.
 
 Quickstart
 ----------
