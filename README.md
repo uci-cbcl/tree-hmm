@@ -164,7 +164,12 @@ no signal in any species or mark.  A histogram of the resulting read lengths is 
 help identify how much of the genome is retained for a given setting.  The defaults retained
 about 50% of hg19 on the ENCODE data.
 
-    tree-hmm split observations.chr*.npy --min_reads .1 --gauss_window_size 5 --min_size 25
+    tree-hmm split \
+        observations.chr*.npy 
+        start_positions.pkl \
+        --min_reads .1 \
+        --gauss_window_size 5 \
+        --min_size 25
 
 Note: the `--gauss_window_size` and `--min_size` are in terms of *bins*.  So if you want a 
 smoothing window that acts over 10kb up and downstream (20kb total), and had specified a
@@ -219,9 +224,14 @@ converted and split set of files, iterating until the change in free energy
 is < 1e-5 in either the E-step or the M-step and running in parallel locally
 rather than on an SGE grid:
 
-    tree-hmm infer 18 \
-        --max_iter 5 --max_E_iter 10 --approx poc --epsilon 1e-5 \
-        --epsilon_e 1e-5 --run_local \
+    tree-hmm infer \
+        18 \
+        --max_iter 5 \
+        --max_E_iter 10 \
+        --approx poc \
+        --epsilon 1e-5 \
+        --epsilon_e 1e-5 \
+        --run_local \
         "observations.chr*.chunk*.npy"
 
 
@@ -249,7 +259,9 @@ If you did not use the `split`, you may use the original pkl file:
     tree-hmm q_to_bed infer_out/mf/TIMESTAMP/ start_positions.pkl
 
 These commands will find and output the most likely state assignment in each bin for 
-all species.  Note that this is the maximum a posteriori (MAP) assignment, NOT the 
+all species to a set of bed files: `treehmm_states.{species}.state{k}.bed`.  
+
+Note that this is the maximum a posteriori (MAP) assignment, NOT the 
 most likely joint configuration. ChromHMM also outputs the MAP, whereas Segway uses the most 
 likely joint configuration or  viterbi path.  The `gtmk` inference mode can find the most 
 likely joint configuration, but downstream tools are lacking at the moment.  If you're
@@ -260,3 +272,6 @@ You can also get the full probability matrix (not just most likely state) by spe
 `split` phase.  You may specify where that file is located via `--start_positions`.  If you 
 don't want to split your data beyond by-chromosome, I can modify this step accordingly.
 Again, please raise an issue on Github if you're interested.
+
+
+Finally, you may want to check out pybedtools or Galaxy to do downstream analysis.
