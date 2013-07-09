@@ -21,6 +21,7 @@ def do_parallel_inference(args):
     """
     from treehmm import random_params, do_inference, plot_params, plot_energy, load_params
     from treehmm.vb_mf import normalize_trans
+    from treehmm.static import float_type
 
     _x = sp.load(args.observe_matrix[0])
     args.continuous_observations = _x.dtype != sp.int8
@@ -32,7 +33,7 @@ def do_parallel_inference(args):
     args.free_energy = []
     args.observe = 'all.npy'
     args.last_free_energy = 0
-    args.emit_sum = sp.zeros((K, L), dtype=sp.longdouble)
+    args.emit_sum = sp.zeros((K, L), dtype=float_type)
 
     args.out_dir = args.out_dir.format(timestamp=time.strftime('%x_%X').replace('/', '-'), **args.__dict__)
     try:
@@ -93,18 +94,18 @@ def do_parallel_inference(args):
         print 'iteration', args.iteration
         total_free = 0
         if args.separate_theta:
-            args.theta = sp.zeros((I - 1, K, K, K), dtype=sp.longdouble)
+            args.theta = sp.zeros((I - 1, K, K, K), dtype=float_type)
         else:
-            args.theta = sp.zeros((K, K, K), dtype=sp.longdouble)
+            args.theta = sp.zeros((K, K, K), dtype=float_type)
 
-        args.alpha = sp.zeros((K, K), dtype=sp.longdouble)
-        args.beta = sp.zeros((K, K), dtype=sp.longdouble)
-        args.gamma = sp.zeros((K), dtype=sp.longdouble)
-        args.emit_probs = sp.zeros((K, L), dtype=sp.longdouble)
+        args.alpha = sp.zeros((K, K), dtype=float_type)
+        args.beta = sp.zeros((K, K), dtype=float_type)
+        args.gamma = sp.zeros((K), dtype=float_type)
+        args.emit_probs = sp.zeros((K, L), dtype=float_type)
         if True:  # args.approx == 'clique':
-            args.emit_sum = sp.zeros_like(args.emit_probs, dtype=sp.longdouble)
+            args.emit_sum = sp.zeros_like(args.emit_probs, dtype=float_type)
         else:
-            args.emit_sum = sp.zeros((K, L), dtype=sp.longdouble)
+            args.emit_sum = sp.zeros((K, L), dtype=float_type)
 
         if args.run_local:
             iterator = pool.imap_unordered(do_inference, job_args)

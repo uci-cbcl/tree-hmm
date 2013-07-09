@@ -6,20 +6,20 @@ import copy
 from numpy import array, random, diag
 
 from vb_mf import normalize_trans, normalize_emit, make_log_obs_matrix, make_log_obs_matrix_gaussian
+from treehmm.static import float_type
 
-float_type = np.longdouble
-min_val = np.longdouble('1e-150')
+min_val = float_type('1e-150')
 
 
 def independent_update_qs(args):
     theta, alpha, beta, gamma, X, log_obs_mat, Q, Q_pairs = args.theta, args.alpha, args.beta, args.gamma, args.X, args.log_obs_mat, args.Q, args.Q_pairs
     I, T, L = X.shape
     K = alpha.shape[0]
-    a_s = np.zeros((T, K), dtype=np.longdouble)
-    b_s = np.zeros((T, K), dtype=np.longdouble)
-    Q[:] = np.zeros((I, T, K), dtype=np.longdouble)
-    Q_pairs[:] = np.zeros((I, T, K, K), dtype=np.longdouble)
-    loglh = np.zeros(I, dtype=np.longdouble)
+    a_s = np.zeros((T, K), dtype=float_type)
+    b_s = np.zeros((T, K), dtype=float_type)
+    Q[:] = np.zeros((I, T, K), dtype=float_type)
+    Q_pairs[:] = np.zeros((I, T, K, K), dtype=float_type)
+    loglh = np.zeros(I, dtype=float_type)
     print 'initializing Q',
 
     for i in range(I):
@@ -142,9 +142,9 @@ def independent_free_energy(args):
     """Calculate the free energy for Q"""
     I, T, L = args.X.shape
     K = args.alpha.shape[0]
-    a_s = np.zeros((T,K), dtype=np.longdouble)
-    b_s = np.zeros((T,K), dtype=np.longdouble)
-    loglh = np.zeros(I, dtype=np.longdouble)
+    a_s = np.zeros((T,K), dtype=float_type)
+    b_s = np.zeros((T,K), dtype=float_type)
+    loglh = np.zeros(I, dtype=float_type)
     transmat = args.alpha
 
     for i in range(I):

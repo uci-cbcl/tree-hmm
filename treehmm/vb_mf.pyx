@@ -14,7 +14,8 @@ from scipy.stats import norm
 import time
 
 #ctypedef np.float128_t float_type
-ctypedef long double float_type
+#ctypedef long double float_type
+ctypedef double float_type
 
 
 
@@ -32,7 +33,7 @@ cpdef inline float_type log_obs(Py_ssize_t i, Py_ssize_t t, Py_ssize_t k, float_
     return total
 
 
-_norm_pdf_logC = np.log(np.sqrt(2 * np.pi)).astype(np.longdouble)
+_norm_pdf_logC = np.log(np.sqrt(2 * np.pi)).astype(np.double)
 def _norm_logpdf(x, loc, scale):
     x, loc, scale = map(np.asarray, (x, loc, scale))
     x = (x - loc) * 1.0/scale
@@ -52,8 +53,8 @@ cpdef inline float_type log_obs_gaussian(Py_ssize_t i, Py_ssize_t t, Py_ssize_t 
     ##    time.sleep(.01)
     #return np.log(val).sum()
 
-    #val = norm.logpdf(X[i,t,:], loc=means[k,:], scale=np.sqrt(variances[k,:], dtype=np.longdouble), dtype=np.longdouble)
-    val = _norm_logpdf(X[i,t,:], loc=means[k,:], scale=np.sqrt(variances[k,:], dtype=np.longdouble))
+    #val = norm.logpdf(X[i,t,:], loc=means[k,:], scale=np.sqrt(variances[k,:], dtype=np.double), dtype=np.double)
+    val = _norm_logpdf(X[i,t,:], loc=means[k,:], scale=np.sqrt(variances[k,:], dtype=np.double))
 
     #if np.any(val < -50):
     #    print '********* too low', list(val), i, t, k, list(X[i,t,:]), list(means[k,:]), list(variances[k,:])
@@ -150,7 +151,7 @@ cpdef normalize_emit(np.ndarray[float_type, ndim=3] Q,
     T = Q.shape[1]
     K = emit_probs.shape[0]
     L = emit_probs.shape[1]
-    cdef np.ndarray[float_type, ndim=2] e_sum = np.ones((K,L), dtype=np.longdouble) * pseudocount * T
+    cdef np.ndarray[float_type, ndim=2] e_sum = np.ones((K,L), dtype=np.double) * pseudocount * T
     # all probability goes to one of K states
     for k in range(K):
         for i in xrange(I):
@@ -169,7 +170,7 @@ cpdef normalize_emit(np.ndarray[float_type, ndim=3] Q,
 cpdef mf_random_q(I, T, K):
     """Create a random Q distribution for mean-field inference"""
     # each i,t has a distribution over K
-    Q = np.random.rand(I, T, K).astype(np.longdouble)
+    Q = np.random.rand(I, T, K).astype(np.double)
     q_sum = Q.sum(axis=2)
     for i in xrange(I):
         for t in xrange(T):
@@ -252,11 +253,11 @@ cpdef mf_update_q(args):
     log_gamma = np.log(gamma)
 
     #cdef np.ndarray[float_type, ndim=2] phi = np.zeros((T,K))
-    cdef float_type[:,:] phi = np.zeros((T,K), dtype=np.longdouble)
-    cdef np.ndarray[float_type, ndim=1] totals = np.zeros(T, dtype=np.longdouble)
+    cdef float_type[:,:] phi = np.zeros((T,K), dtype=np.double)
+    cdef np.ndarray[float_type, ndim=1] totals = np.zeros(T, dtype=np.double)
     for i in xrange(I):
         #print 'i', i
-        phi = np.zeros((T,K), dtype=np.longdouble)
+        phi = np.zeros((T,K), dtype=np.double)
         #numpy_array = np.asarray(<float_type[:T,:K]> phi)
         #numpy_array[:] = 0.
         v_chs = vert_children[i]

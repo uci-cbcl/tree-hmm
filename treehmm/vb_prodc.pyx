@@ -16,9 +16,10 @@ from libc.math cimport exp, log
 from vb_mf import normalize_trans, normalize_emit, make_log_obs_matrix, make_log_obs_matrix_gaussian
 
 #ctypedef np.float128_t float_type
-ctypedef long double float_type
+#ctypedef long double float_type
+ctypedef double float_type
 
-cdef float_type min_val = np.longdouble('1e-150')
+cdef float_type min_val = np.double('1e-150')
 #min_val **= 4  # 1e-400
 min_val **= 1  # 1e-100
 #cdef float_type min_val_log_space = np.log(min_val)  # -921.03
@@ -28,11 +29,11 @@ def prodc_initialize_qs(theta, alpha, beta, gamma, X, log_obs_mat):
     I, T, L = X.shape
     #I = 1
     K = alpha.shape[0]
-    a_s = np.zeros((T,K), dtype=np.longdouble)
-    b_s = np.zeros((T,K), dtype=np.longdouble)
-    Q = np.zeros((I,T,K), dtype=np.longdouble)
-    Q_pairs = np.zeros((I,T,K,K), dtype=np.longdouble)
-    loglh = np.zeros(I, dtype=np.longdouble)
+    a_s = np.zeros((T,K), dtype=np.double)
+    b_s = np.zeros((T,K), dtype=np.double)
+    Q = np.zeros((I,T,K), dtype=np.double)
+    Q_pairs = np.zeros((I,T,K,K), dtype=np.double)
+    loglh = np.zeros(I, dtype=np.double)
     print 'initializing Q',
 
     for i in range(I):
@@ -129,14 +130,14 @@ def prodc_update_qs_i_new(int si, np.ndarray[float_type, ndim=3] theta,
         float_type tmpsum_q, tmpsum_qp, total_f1, g_t_max
 
     #cdef np.ndarray[float_type, ndim=3] X = args.X
-    X = args.X.astype(np.longdouble)
+    X = args.X.astype(np.double)
 
 
     # first calculate the transition matrices (all different for different t) for chain si
     print 'prodc_update_qs'
-    a_s = np.zeros((T,K), dtype=np.longdouble)
-    b_s = np.zeros((T,K), dtype=np.longdouble)
-    transmat = np.zeros((T, K, K), dtype=np.longdouble)
+    a_s = np.zeros((T,K), dtype=np.double)
+    b_s = np.zeros((T,K), dtype=np.double)
+    transmat = np.zeros((T, K, K), dtype=np.double)
     #loglh = np.zeros(I)
     emit_probs_mat = np.exp(log_obs_mat[si,:,:]).T
     if np.any(emit_probs_mat < min_val):
@@ -153,24 +154,24 @@ def prodc_update_qs_i_new(int si, np.ndarray[float_type, ndim=3] theta,
         mat[mat < -min_val] = -min_val
     np.seterr(under='print')
 
-    g_t = np.ones(K, dtype=np.longdouble) # initialize for last node
+    g_t = np.ones(K, dtype=np.double) # initialize for last node
     log_g_t = np.log(g_t)
     tmpsum_q = 0.
     tmpsum_qp = 0.
 
     # TODO finish
-    b_t = np.ones(K, dtype=np.longdouble)
+    b_t = np.ones(K, dtype=np.double)
     b_s[T-1,:] = b_t
-    a_t = np.zeros(K, dtype=np.longdouble)
-    s_t = np.zeros(T, dtype=np.longdouble)
-    f1 = np.zeros(K, dtype=np.longdouble)
-    log_f1 = np.zeros(K, dtype=np.longdouble)
-    f_t = np.zeros((K,K), dtype=np.longdouble)
-    log_f = np.zeros((K,K), dtype=np.longdouble)
+    a_t = np.zeros(K, dtype=np.double)
+    s_t = np.zeros(T, dtype=np.double)
+    f1 = np.zeros(K, dtype=np.double)
+    log_f1 = np.zeros(K, dtype=np.double)
+    f_t = np.zeros((K,K), dtype=np.double)
+    log_f = np.zeros((K,K), dtype=np.double)
     total_f1 = 0.
     g_t_max = 0.
-    prev_b_t = np.ones(K, dtype=np.longdouble)
-    prev_a_t = np.zeros(K, dtype=np.longdouble)
+    prev_b_t = np.ones(K, dtype=np.double)
+    prev_a_t = np.zeros(K, dtype=np.double)
 
 
     vp = vert_parent[si]

@@ -1,9 +1,6 @@
 
 import scipy as sp
 
-
-float_type = sp.longdouble
-
 #try:
 #    from ipdb import set_trace as breakpoint
 #except ImportError:
@@ -106,4 +103,13 @@ phylogeny = {'H1hesc':'H1hesc', 'Huvec':'H1hesc', 'Hsmm':'H1hesc',
 #                       [0, 1, 1, 1, 1, 1, 1]], dtype = sp.int8)
 
 #mark_avail = sp.ones((3,6), dtype = sp.int8)
+
+
+
 inference_types = ['mf', 'poc', 'pot', 'clique', 'concat', 'loopy', 'gmtk', 'indep']
+
+
+# use longdouble if getting underflow/divide by zero errors... not guaranteed to help though!
+# also note longdouble's aren't as well supported in scipy (some versions don't support the necessary ufunc's)
+# float_type = sp.longdouble  
+float_type = sp.double
