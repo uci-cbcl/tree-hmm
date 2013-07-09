@@ -173,7 +173,9 @@ used during the conversion. This file (or its twin created by the
 
 Note: there is already preliminary support for missing marks/species
 already present which I can make more user-friendly if there is
-interest. Raise an issue on Github if you're interested.
+interest.  There is also some work on allowing continuous observations (rather
+than the current binary-only observations). Raise an issue/feature request on 
+Github if you're interested.
 
 
 Splitting the data
