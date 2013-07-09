@@ -312,6 +312,26 @@ A few things to note:
    wasn't pursued further.
 
 
+Running on SGE vs. locally
+**************************
+By default, the inference stage in tree-hmm will try to submit jobs through the
+SGE grid.  If it can't do so, it will fall back to running the jobs locally.
+Here are a few tips to make things run faster:
+
+-   If you haven't split your data into chunks using the ``split`` subcommand,
+    you should set the ``--chunksize`` to 1.  That way, each chromosome will be
+    handled by a different job.
+-   For split data running on SGE, set the ``--chunksize`` fairly high (like 
+    100, or even more if you have tens of thousands of chunks).  This will start
+    fewer SGE jobs that will each run longer and save you from being yelled at 
+    by your system administrators
+-   If you're not using SGE, you should explicitly set ``--run_local`` since 
+    it will use a more efficient message passing algorithm (inter-process 
+    communication rather than writing parameters and results to disk).
+-   If you are using SGE, be sure to clean up the (many, many) ``SGE_*`` files
+    which serve as temporary messages outputs while the job is running.
+
+
 Quick Example
 *************
 To infer K=18 states, but only do five M-step iterations, up to 10
