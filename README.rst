@@ -266,8 +266,8 @@ There are also a few more "experimental" modes:
 Changing the phylogeny
 **********************
 The phyologeny connecting each species is specified in `treehmm/static.py` and
-is in the form of a python dictionary, each of whose keys are the parent cell 
-type and whose values are the child cell type. For example, the default 
+is in the form of a python dictionary, each of whose keys are the child cell 
+type and whose values are the parent cell type. For example, the default 
 phylogeny used for the ENCODE data specifies that ``H1hesc`` is the parent of 
 all other cell types::
 
@@ -283,14 +283,15 @@ all other cell types::
 
 A few things to note:
 
--  Cell types that specify themselves as their own parents (like ``H1hesc`` 
+-  Cell types that specify themselves as their own parents (like ``H1hesc``
    above) are considered root nodes (they have no parents) and use a different
    set of parameters than cell types with parents.
 -  While each cell type is allowed to have zero or as many children as you want,
-   each cell type is only allowed to have a single parent.
--  Connecting the tree in a loop (s.t. there is no root node) violates a 
-   fundamental assumption in Bayesian networks (they are supposed to be 
-   directed, Acyclic Graphs). The code may run okay, but you will probably get 
+   each cell type is only allowed to have a single parent. This is enforced
+   already since dictionaries can't have duplicate keys.
+-  Connecting the tree in a loop (s.t. there is no root node) violates a
+   fundamental assumption in Bayesian networks (they are supposed to be
+   directed, Acyclic Graphs). The code may run okay, but you will probably get
    incorrect results.
 -  You can have multiple roots in a graph (e.g., two independent trees or one 
    tree and a single, unrelated cell type). This might help in learning a global
