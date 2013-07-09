@@ -107,6 +107,9 @@ def main(argv=sys.argv[1:]):
     # parse arguments, then call convert_data or do_inference
     parser = make_parser()
     args = parser.parse_args(argv)
+    global phylogeny
+    args.phylogeny = eval(args.phylogeny)
+    phylogeny = args.phylogeny
     if not hasattr(args, 'mark_avail'):
         args.mark_avail = mark_avail
     elif isinstance(args.mark_avail, basestring):
@@ -667,6 +670,8 @@ def make_parser():
     infer_parser.add_argument('--separate_theta', action='store_true', help='use a separate theta matrix for each node of the tree (only works for GMTK)')
     infer_parser.add_argument('--mark_avail', help='npy matrix of available marks',
                                 default=mark_avail)
+    infer_parser.add_argument('--phylogeny', help='the phylogeny connecting each species, as a python dictionary with children for keys and parents for values. Note: this does not have to be a singly-rooted or even a bifurcating phylogeny!  You may specify multiple trees, chains, stars, etc, but should not have loops in the phylogeny.',
+                                default=str(phylogeny))
     infer_parser.set_defaults(func=do_inference)
 
 
@@ -757,7 +762,10 @@ def make_tree(args):
     #tree_by_parents = {0:sp.inf, 1:0, 2:0}  # 3 species, 2 with one parent
     #tree_by_parents = {0:sp.inf, 1:0}  # 3 species, 2 with one parent
     #tree_by_parents = dict((args.species.index(k), args.species.index(v)) for k, v in phylogeny.items())
-    tree_by_parents = dict((valid_species.index(k), valid_species.index(v)) for k, v in phylogeny.items() if valid_species.index(k) in xrange(I) and valid_species.index(v) in xrange(I))
+    tree_by_parents = dict((valid_species.index(k), valid_species.index(v)) 
+                            for k, v in args.phylogeny.items() if 
+                                valid_species.index(k) in xrange(I) and 
+                                valid_species.index(v) in xrange(I))
     tree_by_parents[0] = sp.inf #'Null'
     print tree_by_parents.keys()
     # [inf, parent(1), parent(2), ...]
