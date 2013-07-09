@@ -83,7 +83,7 @@ setup(
   version = '0.1.0',
   author = ['Jake Biesinger', 'Yuanfeng Wang'],
   author_email = 'jake.biesinger@gmail.com',
-  url = 'https://github.com/xhxielab/tree-hmm',
+  url = 'https://github.com/uci-cbcl/tree-hmm',
   long_description = open('README.md').read(),
   packages = ['treehmm', 'gmtkParam'],
   scripts = ['bin/tree-hmm'],
