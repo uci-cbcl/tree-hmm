@@ -144,11 +144,9 @@ You can specify the naming convention your data follows via the
 During this step, all of the BAM files will be scanned and
 histogrammed. Replicants are pooled together and the reads are binarized
 using a poisson background rate specific to each mark/species
-combination, i.e.,:
+combination, i.e.,::
 
-.. math::
-
-    bgrate_{il} = \frac{ \sum_{t=1}^T count_{itl} }{ T }
+    bgrate_{il} = \frac{\sum_{t=1}^T count_{itl}} {T}
     markpresence_{il} = poisson.survival(count_{itl}, bg_rate_{il}) < max_pvalue
 
 where `max_pvalue` can be specified by the user. This simply imposes a
