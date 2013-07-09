@@ -218,12 +218,7 @@ There are also a few more "experimental" modes:
     http://noble.gs.washington.edu/proj/segway/
 
 
-
-To infer, e.g., K=5 hidden states on the included test data, you can do:
-
-    tree-hmm infer 5 test_data/*.npy
-
-Or to infer 18 states, but only do five M-step iterations, up to 10 E-step 
+To infer K=18 states, but only do five M-step iterations, up to 10 E-step 
 iterations per M-step, use the product-of-chains approximation on the entire
 converted and split set of files, iterating until the change in free energy 
 is < 1e-5 in either the E-step or the M-step and running in parallel locally
