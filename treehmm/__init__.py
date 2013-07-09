@@ -873,7 +873,7 @@ def split_data(args):
     pyplot.figtext(.5,.01,'%s regions; %s bins total; %s bins covered; coverage = %.3f' % (len(sizes),total_size, covered_size, covered_size / float(total_size)), ha='center')
     pyplot.hist(sizes, bins=100)
     pyplot.title('chunk sizes for all chroms, min_reads %s, min_size %s, gauss_window_size %s' % (args.min_reads, args.min_size, args.gauss_window_size))
-    pyplot.savefig('chunk_sizes.minreads%s.minsize%s.windowsize%s.png' % (args.min_reads, args.min_size, args.window_size))
+    pyplot.savefig('chunk_sizes.minreads%s.minsize%s.windowsize%s.png' % (args.min_reads, args.min_size, args.gauss_window_size))
 
     with open('start_positions_split.pkl', 'w') as outfile:
         attrs = dict(windowsize=windowsize, start_positions=start_positions, 
