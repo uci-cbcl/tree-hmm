@@ -84,7 +84,7 @@ setup(
   author = ['Jake Biesinger', 'Yuanfeng Wang'],
   author_email = 'jake.biesinger@gmail.com',
   url = 'https://github.com/uci-cbcl/tree-hmm',
-  long_description = open('README.md').read(),
+  long_description = open('README').read(),
   packages = ['treehmm', 'gmtkParam'],
   scripts = ['bin/tree-hmm'],
   cmdclass = {'build_ext': build_ext},

@@ -85,7 +85,7 @@ Installing tree-hmm
 
 * For the latest development version:
 
-    sudo pip install -e git+https://github.com/uci-cbcl/tree-hmm.git#egg=tree_hmm
+    sudo pip install -e git+https://github.com/uci-cbcl/tree-hmm.git#egg=treehmm
 
 * To be able to hack on the code yourself:
     
