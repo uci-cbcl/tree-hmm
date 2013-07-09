@@ -108,12 +108,12 @@ def do_parallel_inference(args):
             args.emit_sum = sp.zeros((K, L), dtype=float_type)
 
         if args.run_local:
-            iterator = pool.imap_unordered(do_inference, job_args)
+            iterator = pool.imap_unordered(do_inference, job_args, chunksize=args.chunksize)
             # wait for jobs to finish
             for result in iterator:
                 pass
         else:
-            jobs_handle = pool.map_async(do_inference, job_args, chunksize=12)
+            jobs_handle = pool.map_async(do_inference, job_args, chunksize=args.chunksize)
             # wait for all jobs to finish
             for j in jobs_handle:
                 j.wait()

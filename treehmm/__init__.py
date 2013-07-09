@@ -672,6 +672,8 @@ def make_parser():
                                 default=mark_avail)
     infer_parser.add_argument('--phylogeny', help='the phylogeny connecting each species, as a python dictionary with children for keys and parents for values. Note: this does not have to be a singly-rooted or even a bifurcating phylogeny!  You may specify multiple trees, chains, stars, etc, but should not have loops in the phylogeny.',
                                 default=str(phylogeny))
+    infer_parser.add_argument('--chunksize', help='The number of chunks (for convert+split data) or chromosomes (for convert only) to submit to each runner.  When running on SGE, you should set this number relatively high (in 100s?) since each job has a very slow startup time. When running locally, this is the number of chunks each subprocess will handle at a time.',
+                                default=1)
     infer_parser.set_defaults(func=do_inference)
 
 
