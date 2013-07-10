@@ -93,6 +93,6 @@ setup(
   classifiers=[
             'Development Status :: 3 - Alpha',
             'Intended Audience :: Science/Research',
-            'License :: OSI Approved :: GNU General Public License (GPL)',
+            'License :: OSI Approved :: BSD License',
             'Topic :: Scientific/Engineering :: Bio-Informatics'],
 )
