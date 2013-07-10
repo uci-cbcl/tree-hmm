@@ -1,4 +1,3 @@
-
 This package implements a tree hidden Markov model for learning epigenetic 
 states in multiple cell types. It's similar to the bioinformatics tools 
 `ChromHMM <http://compbio.mit.edu/ChromHMM/>`_ and 
@@ -73,6 +72,7 @@ Quickstart
 
 Prerequisites
 -------------
+-  Python 2.7
 -  Scipy
 -  Matplotlib (optional for plotting)
 -  PySAM (optional for converting SAM files to 0/1 Numpy matrices)
