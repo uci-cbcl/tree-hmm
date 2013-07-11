@@ -107,15 +107,16 @@ def main(argv=sys.argv[1:]):
     # parse arguments, then call convert_data or do_inference
     parser = make_parser()
     args = parser.parse_args(argv)
-    global phylogeny
-    args.phylogeny = eval(args.phylogeny)
-    phylogeny = args.phylogeny
     if not hasattr(args, 'mark_avail'):
         args.mark_avail = mark_avail
     elif isinstance(args.mark_avail, basestring):
         args.mark_avail = sp.load(args.mark_avail)
     if args.func == do_inference:
         # allow patterns on the command line
+        global phylogeny
+        args.phylogeny = eval(args.phylogeny)
+        phylogeny = args.phylogeny
+
         all_obs = []
         for obs_pattern in args.observe_matrix:
             obs_files = glob.glob(obs_pattern)
